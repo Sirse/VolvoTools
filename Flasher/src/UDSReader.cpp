@@ -124,6 +124,9 @@ void UDSReader::startImpl(std::vector<std::unique_ptr<j2534::J2534Channel>>& cha
             if (!common::UDSProtocolCommonSteps::startRoutine(channel, canId, bootloader->header.call)) {
                 setFailure("Bootloader starting failed", errorUpdater);
             }
+            if (!common::UDSProtocolCommonSteps::authorize(channel, canId, _udsReaderParameters.pin)) {
+                setFailure("SBL post-start authorization failed", errorUpdater);
+            }
         }
 
         setCurrentState(FlasherState::ReadFlash);
