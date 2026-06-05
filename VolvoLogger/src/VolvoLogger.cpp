@@ -167,10 +167,13 @@ int main(int argc, const char *argv[]) {
           }
           logger::LoggerApplication::instance().stop();
         } catch (const std::exception &ex) {
+          LOG(ERROR) << "Logger command failed: " << ex.what();
           std::cout << ex.what() << std::endl;
         } catch (const char *ex) {
+          LOG(ERROR) << "Logger command failed: " << ex;
           std::cout << ex << std::endl;
         } catch (...) {
+          LOG(ERROR) << "Logger command failed with unknown exception";
           std::cout << "exception" << std::endl;
         }
       }

@@ -37,6 +37,7 @@
 #include <atomic>
 #include <cctype>
 #include <cstdlib>
+#include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <iterator>
@@ -149,6 +150,14 @@ const char* readFormatToString(ReadFormat format)
 		return "bin";
 	}
 	return "unknown";
+}
+
+void ensureOutputDirectoryExists(const std::string& path)
+{
+	const std::filesystem::path outputPath{ path };
+	if (const auto parent = outputPath.parent_path(); !parent.empty()) {
+		std::filesystem::create_directories(parent);
+	}
 }
 
 void UDSProgramMode(common::CarPlatform carPlatform, uint8_t ecuId, j2534::J2534& j2534,
@@ -453,6 +462,7 @@ private:
 };
 
 void writeBinToFile(const std::vector<uint8_t>& bin, const std::string& path) {
+	ensureOutputDirectoryExists(path);
 	std::fstream out(path, std::ios::out | std::ios::binary);
 	const auto msgs =
 		common::D2Messages::createWriteDataMsgs(static_cast<uint8_t>(common::ECUType::ECM_ME), bin);
@@ -1469,6 +1479,7 @@ void writeIntelHexRecord(std::ostream& output, uint8_t type, uint16_t address, c
 
 void saveIntelHex(const std::string& path, uint32_t start, const std::vector<uint8_t>& data)
 {
+	ensureOutputDirectoryExists(path);
 	std::ofstream output(path);
 	if (!output) {
 		throw std::runtime_error("Failed to open output file: " + path);
@@ -1497,6 +1508,7 @@ void saveIntelHex(const std::string& path, uint32_t start, const std::vector<uin
 
 void saveRawBin(const std::string& path, const std::vector<uint8_t>& data)
 {
+	ensureOutputDirectoryExists(path);
 	std::ofstream output(path, std::ios_base::binary | std::ios_base::out);
 	if (!output) {
 		throw std::runtime_error("Failed to open output file: " + path);
@@ -1616,8 +1628,12 @@ void readFlash(std::unique_ptr<j2534::J2534> j2534, common::CarPlatform carPlatf
 		<< std::endl;
 	if (success)
 	{
+		ensureOutputDirectoryExists(flashPath);
 		std::fstream output(flashPath,
 			std::ios_base::binary | std::ios_base::out);
+		if (!output) {
+			throw std::runtime_error("Failed to open output file: " + flashPath);
+		}
 		output.write((const char*)bin.data(), bin.size());
 	}
 }
