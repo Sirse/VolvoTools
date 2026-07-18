@@ -18,6 +18,8 @@ Release/
 /VolvoFlasher/Release
 /VolvoFlasher/Debug
 /build
+/build-x86
+/build-x64
 CMakeFiles
 CMakeCache.txt
 CMakeUserPresets.json
@@ -29,3 +31,16 @@ cmake_install.cmake
 *.user
 *.VC.db
 *.sln
+
+# Runtime logs produced by the tools
+*.log
+
+# CMake build directories
+build/
+build-x86/
+build-x64/
+build_review/
+**/build/
+**/build-x86/
+**/build-x64/
+**/build_review/
