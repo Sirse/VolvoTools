@@ -20,6 +20,7 @@
 #include <cctype>
 #include <codecvt>
 #include <iomanip>
+#include <iostream>
 #include <locale>
 #include <sstream>
 #include <stdexcept>
@@ -29,6 +30,18 @@
 
 namespace common {
 namespace {
+
+    // Mirrors log output to stderr on top of the file sink. Used under --debug so the
+    // channel/CAN-id resolution and other INFO lines are visible on the console without
+    // touching stdout (VolvoDiag keeps stdout for structured CSV output).
+    class StderrLogDispatch : public el::LogDispatchCallback {
+    protected:
+        void handle(const el::LogDispatchData* data) override {
+            const el::LogMessage* message = data->logMessage();
+            std::cerr << message->logger()->logBuilder()->build(message,
+                data->dispatchAction() == el::base::DispatchAction::NormalLog);
+        }
+    };
 
     constexpr const char* supportedCarPlatforms = "P80, P1, P1_UDS, P2, P2_250, P2_UDS, P3, SPA, Ford_KWP, Ford_UDS, Haval_UDS";
 
@@ -1203,6 +1216,11 @@ namespace {
         defaultConf.set(el::Level::Trace, el::ConfigurationType::Enabled, debugLogging ? "true" : "false");
         el::Loggers::reconfigureAllLoggers(defaultConf);
         el::Loggers::setDefaultConfigurations(defaultConf, true);
+        // Under --debug also echo logs to stderr so the operator can see channel/CAN-id
+        // resolution live; stdout stays clean for command output.
+        if (debugLogging) {
+            el::Helpers::installLogDispatchCallback<StderrLogDispatch>("StderrLogDispatch");
+        }
     }
 
     uint16_t crc16(const uint8_t* data_p, size_t length)
