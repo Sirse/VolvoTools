@@ -167,7 +167,7 @@ bool getRunOptions(int argc, const char* argv[], std::string& deviceName,
 	bool& pinUpward, bool& resetFunctional, unsigned long& programHoldSeconds,
 	ProgramMode& flashProgramMode, ReadFormat& readFormat,
 	std::vector<std::string>& rawData, bool& noWakeup, bool& attachRunningSbl,
-	bool& udsRawWake, uint8_t& udsRawSession) {
+	bool& udsRawWake, uint8_t& udsRawSession, bool& noSblAuth) {
 	argparse::ArgumentParser program("VolvoFlasher", "1.0", argparse::default_arguments::help);
     const auto addDebugArgument = [](argparse::ArgumentParser& parser) {
         parser.add_argument("--debug").default_value(false).implicit_value(true).nargs(0)
@@ -202,6 +202,8 @@ bool getRunOptions(int argc, const char* argv[], std::string& deviceName,
 		.help("Programming mode handling for UDS reading: vehicle or bench");
 	read_command.add_argument("--attach-running-sbl").default_value(false).implicit_value(true).nargs(0)
 		.help("Read through an already running RAM SBL; skips fallAsleep/authorize/load/start");
+	read_command.add_argument("--no-sbl-auth").default_value(false).implicit_value(true).nargs(0)
+		.help("Skip SecurityAccess (27 01) against the SBL; use with a resident/read SBL that does not implement it");
 
 	argparse::ArgumentParser test_command("test", "1.0", argparse::default_arguments::help);
     addDebugArgument(test_command);
@@ -272,6 +274,7 @@ bool getRunOptions(int argc, const char* argv[], std::string& deviceName,
 			readFormat = parseReadFormat(read_command.get<std::string>("--format"));
 			flashProgramMode = parseProgramMode(read_command.get<std::string>("--program-mode"));
 			attachRunningSbl = read_command.get<bool>("--attach-running-sbl");
+			noSblAuth = read_command.get<bool>("--no-sbl-auth");
 			runMode = RunMode::Read;
 		}
 		else if (program.is_subcommand_used(test_command)) {
@@ -1559,7 +1562,8 @@ void saveReadResult(const std::string& path, uint32_t start, const std::vector<u
 
 void readFlash(std::unique_ptr<j2534::J2534> j2534, common::CarPlatform carPlatform, uint8_t ecuId,
 	const std::string& flashPath, unsigned long start, unsigned long datasize, uint64_t pin,
-	const std::string& sblPath, ProgramMode programMode, ReadFormat readFormat, bool attachRunningSbl)
+	const std::string& sblPath, ProgramMode programMode, ReadFormat readFormat, bool attachRunningSbl,
+	bool noSblAuth)
 {
 	const auto ecuInfo{ common::getEcuInfoByEcuId(carPlatform, ecuId) };
 	if (std::get<0>(ecuInfo).protocolId == ISO15765) {
@@ -1607,6 +1611,7 @@ void readFlash(std::unique_ptr<j2534::J2534> j2534, common::CarPlatform carPlatf
 			common::getPinArray(pin),
 			skipFallAsleep,
 			attachRunningSbl,
+			noSblAuth,
 			static_cast<uint32_t>(start),
 			static_cast<uint32_t>(datasize)
 		};
@@ -1803,11 +1808,12 @@ int main(int argc, const char* argv[]) {
 	bool attachRunningSbl = false;
 	bool udsRawWake = false;
 	uint8_t udsRawSession = 0;
+	bool noSblAuth = false;
 	const auto devices = common::getAvailableDevices();
 	if (getRunOptions(argc, argv, deviceName, baudrate, flashPath, pin, ecuId, start, datasize,
 		runMode, sblPath, carPlatform, scanPinsUpward, resetFunctional, programHoldSeconds, flashProgramMode,
 		readFormat, rawData, noWakeup, attachRunningSbl,
-		udsRawWake, udsRawSession)) {
+		udsRawWake, udsRawSession, noSblAuth)) {
 		j2534::DeviceInfo device;
 		try {
 			device = common::selectSingleDevice(devices, deviceName);
@@ -1858,7 +1864,7 @@ int main(int argc, const char* argv[]) {
 			}
 			else if (runMode == RunMode::Read) {
 				readFlash(std::move(j2534), carPlatform, ecuId, flashPath, start, datasize,
-					pin, sblPath, flashProgramMode, readFormat, attachRunningSbl);
+					pin, sblPath, flashProgramMode, readFormat, attachRunningSbl, noSblAuth);
 			}
 			else if (runMode == RunMode::Flash) {
 				const auto ecuInfo{ common::getEcuInfoByEcuId(carPlatform, ecuId) };
