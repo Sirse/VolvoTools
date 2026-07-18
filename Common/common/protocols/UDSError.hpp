@@ -1,6 +1,8 @@
 #pragma once
 
+#include <cstdint>
 #include <stdexcept>
+#include <vector>
 
 
 namespace common {
@@ -51,11 +53,23 @@ public:
     };
 
     UDSError(uint8_t errorCode);
+    // Carries the negative-response context so callers can log a real RX row: the
+    // rejected service id and the CAN id the ECU answered on.
+    UDSError(uint8_t errorCode, uint8_t serviceId, uint32_t responseCanId);
 
     uint8_t getErrorCode() const noexcept;
+    uint8_t getServiceId() const noexcept;      // 0 when unknown
+    uint32_t getResponseCanId() const noexcept; // 0 when unknown
+    bool hasFrameContext() const noexcept;      // true when serviceId/canId are known
+
+    // The raw UDS negative response bytes: { 0x7F, serviceId, nrc }.
+    std::vector<uint8_t> negativeResponse() const;
 
 private:
     uint8_t _errorCode;
+    uint8_t _serviceId{0};
+    uint32_t _responseCanId{0};
+    bool _hasFrameContext{false};
 };
 
 } // namespace common

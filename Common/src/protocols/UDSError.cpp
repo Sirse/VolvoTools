@@ -99,9 +99,38 @@ UDSError::UDSError(uint8_t errorCode)
 {
 }
 
+UDSError::UDSError(uint8_t errorCode, uint8_t serviceId, uint32_t responseCanId)
+    : std::runtime_error{getWhatString(errorCode)}
+    , _errorCode{ errorCode }
+    , _serviceId{ serviceId }
+    , _responseCanId{ responseCanId }
+    , _hasFrameContext{ true }
+{
+}
+
 uint8_t UDSError::getErrorCode() const noexcept
 {
     return _errorCode;
+}
+
+uint8_t UDSError::getServiceId() const noexcept
+{
+    return _serviceId;
+}
+
+uint32_t UDSError::getResponseCanId() const noexcept
+{
+    return _responseCanId;
+}
+
+bool UDSError::hasFrameContext() const noexcept
+{
+    return _hasFrameContext;
+}
+
+std::vector<uint8_t> UDSError::negativeResponse() const
+{
+    return { 0x7F, _serviceId, _errorCode };
 }
 
 } // namespace common

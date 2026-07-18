@@ -1176,7 +1176,8 @@ namespace {
         if(dataSize < 7 || data[4] != 0x7F || data[5] != requestId) {
             return;
         }
-        throw UDSError(data[6]);
+        const uint32_t responseCanId = encodeBigEndian(data[0], data[1], data[2], data[3]);
+        throw UDSError(data[6], data[5], responseCanId);
     }
 
     void checkD2Error(uint8_t ecuId, const std::vector<uint8_t>& requestId, const uint8_t* data, size_t dataSize)

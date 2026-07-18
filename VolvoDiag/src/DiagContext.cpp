@@ -160,7 +160,16 @@ std::vector<uint8_t> processUds(const j2534::J2534Channel& channel, uint32_t can
     }
     catch (const std::exception& ex) {
         if (gUdsTrace) {
-            gUdsTrace->write(canId, "error", {}, ex.what());
+            // An ECU negative response is a real RX frame, not a local/transport error.
+            // Log it as an rx row with the raw 7F <sid> <nrc> bytes on the response can id,
+            // never attributed to the tx id.
+            if (const auto* nrc = dynamic_cast<const common::UDSError*>(&ex)) {
+                const auto rxCanId = nrc->hasFrameContext() ? nrc->getResponseCanId() : canId;
+                gUdsTrace->write(rxCanId, "rx", nrc->negativeResponse(),
+                    "NRC " + hexNumber(nrc->getErrorCode(), 2) + " (" + ex.what() + ")");
+            } else {
+                gUdsTrace->write(canId, "error", {}, ex.what());
+            }
         }
         throw;
     }
