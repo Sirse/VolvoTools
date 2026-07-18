@@ -1835,6 +1835,21 @@ int main(int argc, const char* argv[]) {
 				<< " ecu=0x" << std::hex << static_cast<int>(ecuId)
 				<< " baudrate=" << std::dec << baudrate
 				<< " input=" << flashPath;
+			// Print the resolved target loudly so a forgotten/wrong --ecu (which otherwise
+			// silently picks a different module's CAN ids and just times out) is obvious.
+			try {
+				const auto targetInfo{ common::getEcuInfoByEcuId(carPlatform, ecuId) };
+				const auto& targetBus = std::get<0>(targetInfo);
+				const auto& targetEcu = std::get<1>(targetInfo);
+				std::cerr << "[target] ecu=0x" << std::hex << static_cast<int>(ecuId)
+					<< " canId=0x" << targetEcu.canId << std::dec
+					<< " bus=\"" << targetBus.name << "\""
+					<< " ecuName=\"" << targetEcu.name << "\""
+					<< " baudrate=" << targetBus.baudrate << std::endl;
+			}
+			catch (const std::exception& ex) {
+				LOG(INFO) << "resolved-target banner skipped: " << ex.what();
+			}
 			if (runMode == RunMode::Wakeup) {
 				UDSWakeup(carPlatform, ecuId, *j2534);
 			}
