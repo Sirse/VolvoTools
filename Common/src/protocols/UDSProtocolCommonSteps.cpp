@@ -271,7 +271,7 @@ namespace common {
             if (downloadResponse.size() < 2) {
                 return false;
             }
-            const uint32_t maxNumberOfBlockLength = encodeBigEndian(downloadResponse[1], downloadResponse[0]);
+            const uint32_t maxNumberOfBlockLength = encodeBigEndian(downloadResponse[0], downloadResponse[1]);
             if (maxNumberOfBlockLength <= 2) {
                 LOG(ERROR) << "RequestDownload invalid max block size: 0x" << std::hex << maxNumberOfBlockLength;
                 return false;

@@ -7,24 +7,64 @@
 #include "common/protocols/UDSError.hpp"
 #include "common/ECUInfo.hpp"
 
-#include <Registry/include/Registry.hpp>
 #include <j2534/J2534Channel.hpp>
 #include <j2534/J2534_v0404.h>
+
+#include <Windows.h>
 
 #include <yaml-cpp/yaml.h>
 
 #include <easylogging++.h>
 
 #include <algorithm>
+#include <cctype>
 #include <codecvt>
 #include <iomanip>
 #include <locale>
 #include <sstream>
+#include <stdexcept>
 #include <thread>
 #include <unordered_map>
 #include <fstream>
 
 namespace common {
+namespace {
+
+    constexpr const char* supportedCarPlatforms = "P80, P1, P1_UDS, P2, P2_250, P2_UDS, P3, SPA, Ford_KWP, Ford_UDS, Haval_UDS";
+
+    CarPlatform parseCarPlatformImpl(std::string input, bool throwOnUnknown)
+    {
+        const auto originalInput = input;
+        input = toLower(input);
+        if ("p80" == input)
+            return common::CarPlatform::P80;
+        else if ("p1" == input)
+            return common::CarPlatform::P1;
+        else if ("p1_uds" == input)
+            return common::CarPlatform::P1_UDS;
+        else if ("p2" == input)
+            return common::CarPlatform::P2;
+        else if ("p2_250" == input)
+            return common::CarPlatform::P2_250;
+        else if ("p2_uds" == input)
+            return common::CarPlatform::P2_UDS;
+        else if ("p3" == input)
+            return common::CarPlatform::P3;
+        else if ("spa" == input)
+            return common::CarPlatform::SPA;
+        else if ("ford_kwp" == input)
+            return common::CarPlatform::Ford_KWP;
+        else if ("ford_uds" == input)
+            return common::CarPlatform::Ford_UDS;
+        else if ("haval_uds" == input)
+            return common::CarPlatform::Haval_UDS;
+        if (throwOnUnknown) {
+            throw std::runtime_error("Unknown car platform \"" + originalInput + "\". Supported values: " + supportedCarPlatforms);
+        }
+        return common::CarPlatform::Undefined;
+    }
+
+} // namespace
 
     std::wstring toWstring(const std::string& str) {
         using convert_type = std::codecvt_utf8<wchar_t>;
@@ -38,36 +78,45 @@ namespace common {
         return converter.to_bytes(str);
     }
 
+    uint32_t encodeBigEndian(uint8_t byte1) { return byte1; }
+    uint32_t encodeBigEndian(uint8_t byte1, uint8_t byte2) {
+        return (static_cast<uint32_t>(byte1) << 8) | byte2;
+    }
+    uint32_t encodeBigEndian(uint8_t byte1, uint8_t byte2, uint8_t byte3) {
+        return (static_cast<uint32_t>(byte1) << 16) | (static_cast<uint32_t>(byte2) << 8) | byte3;
+    }
     uint32_t encodeBigEndian(uint8_t byte1, uint8_t byte2, uint8_t byte3, uint8_t byte4) {
-        return byte1 + (byte2 << 8) + (byte3 << 16) + (byte4 << 24);
+        return (static_cast<uint32_t>(byte1) << 24) | (static_cast<uint32_t>(byte2) << 16)
+            | (static_cast<uint32_t>(byte3) << 8) | byte4;
     }
 
+    uint32_t encodeLittleEndian(uint8_t byte1) { return byte1; }
+    uint32_t encodeLittleEndian(uint8_t byte1, uint8_t byte2) {
+        return byte1 | (static_cast<uint32_t>(byte2) << 8);
+    }
+    uint32_t encodeLittleEndian(uint8_t byte1, uint8_t byte2, uint8_t byte3) {
+        return byte1 | (static_cast<uint32_t>(byte2) << 8) | (static_cast<uint32_t>(byte3) << 16);
+    }
     uint32_t encodeLittleEndian(uint8_t byte1, uint8_t byte2, uint8_t byte3, uint8_t byte4) {
-        return byte4 + (byte3 << 8) + (byte2 << 16) + (byte1 << 24);
+        return byte1 | (static_cast<uint32_t>(byte2) << 8) | (static_cast<uint32_t>(byte3) << 16)
+            | (static_cast<uint32_t>(byte4) << 24);
     }
 
     uint32_t encodeBigEndian(const std::vector<uint8_t>& data) {
         uint32_t result{};
-        auto it = data.cbegin();
-        for(size_t i = 0; i < 4; ++i) {
-            result += (*it) << (i * 8);
-            ++it;
-            if(it == data.cend()) {
-                break;
-            }
+        const auto size = std::min(data.size(), sizeof(result));
+        for (size_t i = 0; i < size; ++i) {
+            const auto byte = data[i];
+            result = (result << 8) | byte;
         }
         return result;
     }
 
     uint32_t encodeLittleEndian(const std::vector<uint8_t>& data) {
         uint32_t result{};
-        auto it = data.crbegin();
-        for(size_t i = 0; i < 4; ++i) {
-            result += ((*it) << (i * 8));
-            ++it;
-            if(it == data.crend()) {
-                break;
-            }
+        const auto size = std::min(data.size(), sizeof(result));
+        for (size_t i = 0; i < size; ++i) {
+            result |= static_cast<uint32_t>(data[i]) << (i * 8);
         }
         return result;
     }
@@ -92,6 +141,19 @@ namespace common {
         ss << std::uppercase << std::hex << std::setfill('0');
         for (const auto byte: data) {
             ss << std::setw(2) << static_cast<int>(byte) << ' ';
+        }
+        return ss.str();
+    }
+
+    std::string formatHexBytesLower(const std::vector<uint8_t>& data)
+    {
+        std::stringstream ss;
+        ss << std::hex << std::setfill('0');
+        for (size_t i = 0; i < data.size(); ++i) {
+            if (i > 0) {
+                ss << ' ';
+            }
+            ss << std::setw(2) << static_cast<unsigned>(data[i]);
         }
         return ss.str();
     }
@@ -166,6 +228,151 @@ namespace common {
         return data;
     }
 
+    std::vector<j2534::DeviceInfo> matchDevices(const std::vector<j2534::DeviceInfo>& devices,
+                                                const std::string& deviceName)
+    {
+        std::vector<j2534::DeviceInfo> result;
+        for (const auto& device : devices) {
+            if (deviceName.empty() || device.deviceName.find(deviceName) != std::string::npos) {
+                result.push_back(device);
+            }
+        }
+        return result;
+    }
+
+    j2534::DeviceInfo selectSingleDevice(const std::vector<j2534::DeviceInfo>& devices,
+                                         const std::string& deviceName)
+    {
+        const auto matched = matchDevices(devices, deviceName);
+        if (matched.empty()) {
+            throw DeviceSelectionError(deviceName.empty()
+                ? "No J2534 devices found."
+                : "No J2534 devices matched --device \"" + deviceName + "\".");
+        }
+        if (matched.size() > 1) {
+            std::stringstream ss;
+            ss << (deviceName.empty()
+                ? "Multiple J2534 devices found. Specify --device."
+                : "Multiple J2534 devices matched --device \"" + deviceName + "\".");
+            for (const auto& device : matched) {
+                ss << "\n    " << device.deviceName;
+            }
+            throw DeviceSelectionError(ss.str());
+        }
+        return matched.front();
+    }
+
+    std::string trim(const std::string& input)
+    {
+        const auto begin = std::find_if_not(input.cbegin(), input.cend(), [](unsigned char ch) {
+            return std::isspace(ch);
+        });
+        const auto end = std::find_if_not(input.crbegin(), input.crend(), [](unsigned char ch) {
+            return std::isspace(ch);
+        }).base();
+        return begin < end ? std::string(begin, end) : std::string{};
+    }
+
+    std::vector<uint8_t> parseHexBytes(const std::string& input)
+    {
+        std::string normalized;
+        normalized.reserve(input.size());
+        bool hasSeparator = false;
+        for (const auto ch : input) {
+            if (std::isspace(static_cast<unsigned char>(ch)) || ch == ',' || ch == ';' || ch == ':') {
+                hasSeparator = true;
+            }
+            normalized.push_back((ch == ',' || ch == ';' || ch == ':') ? ' ' : ch);
+        }
+
+        const auto trimmed = trim(normalized);
+        if (!hasSeparator && trimmed.size() > 2) {
+            std::string compact = trimmed;
+            if (compact.size() > 2 && compact[0] == '0'
+                && (compact[1] == 'x' || compact[1] == 'X')) {
+                compact = compact.substr(2);
+            }
+            if ((compact.size() % 2) != 0) {
+                throw std::runtime_error("Compact hex payload must contain an even number of digits: " + input);
+            }
+            std::vector<uint8_t> result;
+            result.reserve(compact.size() / 2);
+            for (size_t offset = 0; offset < compact.size(); offset += 2) {
+                const auto token = compact.substr(offset, 2);
+                size_t processedChars = 0;
+                unsigned long value = 0;
+                try {
+                    value = std::stoul(token, &processedChars, 16);
+                }
+                catch (const std::exception&) {
+                    throw std::runtime_error("Invalid hex byte: " + token);
+                }
+                if (processedChars != token.size() || value > 0xFF) {
+                    throw std::runtime_error("Invalid hex byte: " + token);
+                }
+                result.push_back(static_cast<uint8_t>(value));
+            }
+            if (result.empty()) {
+                throw std::runtime_error("Hex payload is empty");
+            }
+            return result;
+        }
+
+        std::stringstream ss{normalized};
+        std::string token;
+        std::vector<uint8_t> result;
+        while (ss >> token) {
+            if (token.size() > 2 && token[0] == '0' && (token[1] == 'x' || token[1] == 'X')) {
+                token = token.substr(2);
+            }
+            if (token.empty() || token.size() > 2) {
+                throw std::runtime_error("Invalid hex byte: " + token);
+            }
+            size_t processedChars = 0;
+            unsigned long value = 0;
+            try {
+                value = std::stoul(token, &processedChars, 16);
+            }
+            catch (const std::exception&) {
+                throw std::runtime_error("Invalid hex byte: " + token);
+            }
+            if (processedChars != token.size() || value > 0xFF) {
+                throw std::runtime_error("Invalid hex byte: " + token);
+            }
+            result.push_back(static_cast<uint8_t>(value));
+        }
+        if (result.empty()) {
+            throw std::runtime_error("Hex payload is empty");
+        }
+        return result;
+    }
+
+    uint32_t parseHexU32(const std::string& input)
+    {
+        const auto trimmed = trim(input);
+        size_t processedChars = 0;
+        unsigned long value = 0;
+        try {
+            value = std::stoul(trimmed, &processedChars, 16);
+        }
+        catch (const std::exception&) {
+            // stoul throws on non-hex or overflow before the checks below run.
+            throw std::runtime_error("Invalid hex value: " + input);
+        }
+        if (trimmed.empty() || processedChars != trimmed.size()) {
+            throw std::runtime_error("Invalid hex value: " + input);
+        }
+        return static_cast<uint32_t>(value);
+    }
+
+    std::vector<uint8_t> udsPayload(const std::vector<uint8_t>& response)
+    {
+        if (response.size() < 5) {
+            throw std::runtime_error("Short UDS response");
+        }
+        return {response.cbegin() + 4, response.cend()};
+    }
+
 #ifdef UNICODE
     std::wstring toPlatformString(const std::string& str) { return toWstring(str); }
 
@@ -178,71 +385,114 @@ namespace common {
     std::string fromPlatformString(const std::string& str) { return str; }
 #endif
 
-    using namespace m4x1m1l14n::Registry;
+    bool queryRegistryString(HKEY key, const wchar_t* valueName, std::wstring& value)
+    {
+        DWORD type = 0;
+        DWORD byteCount = 0;
+        if (RegQueryValueExW(key, valueName, nullptr, &type, nullptr, &byteCount) != ERROR_SUCCESS
+            || (type != REG_SZ && type != REG_EXPAND_SZ) || byteCount == 0) {
+            return false;
+        }
+        std::vector<wchar_t> buffer(byteCount / sizeof(wchar_t) + 1, L'\0');
+        if (RegQueryValueExW(key, valueName, nullptr, &type,
+                             reinterpret_cast<LPBYTE>(buffer.data()), &byteCount) != ERROR_SUCCESS) {
+            return false;
+        }
+        value.assign(buffer.data());
+        return !value.empty();
+    }
 
-    static bool processRegistry(const std::string& keyName,
-        std::string& libraryPath,
-        std::vector<std::string>& deviceNames) {
-        const auto platformKeyName = toPlatformString(keyName);
-        const auto key = LocalMachine->Open(platformKeyName);
-        try {
-            auto localLibraryPath =
-                fromPlatformString(key->GetString(TEXT("FunctionLibrary")));
-            if (!localLibraryPath.empty()) {
-                libraryPath = localLibraryPath;
-                key->EnumerateSubKeys(
-                    [&deviceNames, &platformKeyName](const auto& deviceKeyName) {
-                        const auto key = LocalMachine->Open(
-                            platformKeyName + toPlatformString("\\") + deviceKeyName);
-                        const auto deviceName =
-                            fromPlatformString(key->GetString(TEXT("Name")));
-                        deviceNames.push_back(deviceName);
-                        return true;
-                    });
-                if (deviceNames.empty()) {
-                    const auto deviceName =
-                        fromPlatformString(key->GetString(TEXT("Name")));
-                    deviceNames.push_back(deviceName);
+    struct RegistryHandle {
+        HKEY value{};
+        RegistryHandle() = default;
+        explicit RegistryHandle(HKEY handle) : value{handle} {}
+        RegistryHandle(const RegistryHandle&) = delete;
+        RegistryHandle& operator=(const RegistryHandle&) = delete;
+        RegistryHandle(RegistryHandle&&) = delete;
+        RegistryHandle& operator=(RegistryHandle&&) = delete;
+        ~RegistryHandle() { if (value) RegCloseKey(value); }
+        operator HKEY() const { return value; }
+    };
+
+    void appendJ2534Device(std::vector<j2534::DeviceInfo>& result,
+                           std::string libraryPath, std::string deviceName)
+    {
+        const auto duplicate = std::find_if(result.cbegin(), result.cend(),
+            [&](const auto& device) {
+                return device.libraryName == libraryPath && device.deviceName == deviceName;
+            });
+        if (duplicate == result.cend()) {
+            result.push_back({std::move(libraryPath), std::move(deviceName)});
+        }
+    }
+
+    void collectJ2534RegistryView(REGSAM view, std::vector<j2534::DeviceInfo>& result)
+    {
+        constexpr wchar_t rootPath[] = L"Software\\PassThruSupport.04.04";
+        HKEY root = nullptr;
+        if (RegOpenKeyExW(HKEY_LOCAL_MACHINE, rootPath, 0, KEY_READ | view, &root) != ERROR_SUCCESS) {
+            return;
+        }
+        const RegistryHandle closeRoot{root};
+        for (DWORD index = 0;; ++index) {
+            wchar_t vendorName[256]{};
+            DWORD vendorNameLength = static_cast<DWORD>(sizeof(vendorName) / sizeof(vendorName[0]));
+            if (RegEnumKeyExW(root, index, vendorName, &vendorNameLength, nullptr, nullptr, nullptr, nullptr) != ERROR_SUCCESS) {
+                break;
+            }
+            std::wstring vendorPath = std::wstring(rootPath) + L"\\" + vendorName;
+            HKEY vendor = nullptr;
+            if (RegOpenKeyExW(HKEY_LOCAL_MACHINE, vendorPath.c_str(), 0, KEY_READ | view, &vendor) != ERROR_SUCCESS) {
+                continue;
+            }
+            const RegistryHandle closeVendor{vendor};
+            std::wstring libraryPath;
+            if (!queryRegistryString(vendor, L"FunctionLibrary", libraryPath)) {
+                continue;
+            }
+            // Standard PassThruSupport layout keeps Name/FunctionLibrary directly on this key
+            // (handled by the fallback below). The nested loop covers rare vendors that group
+            // devices in subkeys; those are assumed to share this key's FunctionLibrary.
+            bool foundDevice = false;
+            for (DWORD deviceIndex = 0;; ++deviceIndex) {
+                wchar_t deviceKeyName[256]{};
+                DWORD deviceKeyNameLength = static_cast<DWORD>(sizeof(deviceKeyName) / sizeof(deviceKeyName[0]));
+                if (RegEnumKeyExW(vendor, deviceIndex, deviceKeyName, &deviceKeyNameLength,
+                                  nullptr, nullptr, nullptr, nullptr) != ERROR_SUCCESS) {
+                    break;
+                }
+                std::wstring devicePath = vendorPath + L"\\" + deviceKeyName;
+                HKEY device = nullptr;
+                if (RegOpenKeyExW(HKEY_LOCAL_MACHINE, devicePath.c_str(), 0, KEY_READ | view, &device) != ERROR_SUCCESS) {
+                    continue;
+                }
+                const RegistryHandle closeDevice{device};
+                std::wstring deviceName;
+                if (queryRegistryString(device, L"Name", deviceName)) {
+                    appendJ2534Device(result, toString(libraryPath), toString(deviceName));
+                    foundDevice = true;
+                }
+            }
+            if (!foundDevice) {
+                std::wstring deviceName;
+                if (queryRegistryString(vendor, L"Name", deviceName)) {
+                    appendJ2534Device(result, toString(libraryPath), toString(deviceName));
                 }
             }
         }
-        catch (...) {
-            return true;
-        }
-        return !libraryPath.empty();
     }
 
     std::vector<j2534::DeviceInfo> getAvailableDevices() {
         std::vector<j2534::DeviceInfo> result;
-#if 0
-        result.push_back({ "C:\\Program Files (x86)\\DiCE\\Tools\\TSDiCE32.dll", "DiCE-206751" });
-#else
-        const std::string rootKeyName{ "Software\\PassThruSupport.04.04" };
-        try {
-            const auto key = LocalMachine->Open(toPlatformString(rootKeyName));
-            key->EnumerateSubKeys([&rootKeyName, &result](const auto& subKeyName) {
-                std::string libraryPath;
-                std::vector<std::string> deviceNames;
-                auto res =
-                    processRegistry(rootKeyName + "\\" + fromPlatformString(subKeyName),
-                        libraryPath, deviceNames);
-                if (res) {
-                    for (const auto& deviceName : deviceNames) {
-                        result.push_back({ libraryPath, deviceName });
-                    }
-                }
-                return res;
-                });
-        }
-        catch (...)
-        {
-        }
-
-#endif
+        // Enumerate both registry views: J2534 drivers on x64 typically register only under
+        // the 32-bit WOW6432Node. On a 32-bit build the KEY_WOW64_* flags are ignored and both
+        // passes hit the same view, so appendJ2534Device's dedup is functional, not cosmetic.
+        collectJ2534RegistryView(KEY_WOW64_64KEY, result);
+        collectJ2534RegistryView(KEY_WOW64_32KEY, result);
         return result;
     }
 
-    static PASSTHRU_MSG makePassThruMsg(unsigned long ProtocolID,
+    PASSTHRU_MSG makePassThruMsg(unsigned long ProtocolID,
         unsigned long Flags,
         const std::vector<unsigned char>& data) {
         PASSTHRU_MSG result;
@@ -488,6 +738,84 @@ namespace common {
         return std::move(channel);
     }
 
+    static void startRawCanPassAllFilter(const j2534::J2534Channel& channel)
+    {
+        unsigned long msgId = 0;
+        auto maskMsg = makePassThruMsg(channel.getProtocolId(), channel.getTxFlags(), { 0x00, 0x00, 0x00, 0x00 });
+        auto patternMsg = makePassThruMsg(channel.getProtocolId(), channel.getTxFlags(), { 0x00, 0x00, 0x00, 0x00 });
+        const auto status = channel.startMsgFilter(PASS_FILTER, &maskMsg, &patternMsg, nullptr, msgId);
+        if (status != STATUS_NOERROR) {
+            throw std::runtime_error("Failed to start raw CAN pass-all filter: " + j2534StatusToString(status));
+        }
+    }
+
+    std::unique_ptr<j2534::J2534Channel> openRawCanChannel(j2534::J2534& j2534,
+        const BusConfiguration& bus, std::optional<uint32_t> baudrateOverride)
+    {
+        const auto baudrate = baudrateOverride.value_or(bus.baudrate);
+        const unsigned long flags = bus.canIdBitSize == 29 ? CAN_29BIT_ID : 0;
+
+        std::vector<unsigned long> protocolIds{ CAN };
+        if (baudrate == 125000) {
+            protocolIds.insert(protocolIds.begin(), CAN_PS);
+        }
+
+        for (const auto protocolId : protocolIds) {
+            auto localFlags = flags;
+            if (protocolId == CAN && baudrate == 125000) {
+                localFlags |= PHYSICAL_CHANNEL;
+            }
+            try {
+                auto channel = std::make_unique<j2534::J2534Channel>(j2534, protocolId, localFlags, baudrate, flags);
+                setupChannelParameters(*channel);
+                if (protocolId == CAN_PS) {
+                    std::vector<SCONFIG> pinsConfig(1);
+                    pinsConfig[0].Parameter = J1962_PINS;
+                    pinsConfig[0].Value = 0x030B;
+                    const auto pinStatus = channel->setConfig(pinsConfig);
+                    if (pinStatus != STATUS_NOERROR) {
+                        throw std::runtime_error("Failed to configure raw CAN pins: " + j2534StatusToString(pinStatus));
+                    }
+                }
+                startRawCanPassAllFilter(*channel);
+                LOG(INFO) << "Opened raw CAN channel bus=" << bus.name
+                    << " protocol=" << std::dec << protocolId
+                    << " baudrate=" << baudrate
+                    << " flags=0x" << std::hex << localFlags;
+                return channel;
+            }
+            catch (const std::exception& ex) {
+                LOG(WARNING) << "Failed to open raw CAN channel protocol=" << protocolId
+                    << " baudrate=" << std::dec << baudrate << ": " << ex.what();
+            }
+        }
+
+        throw std::runtime_error("Failed to open raw CAN channel");
+    }
+
+    std::vector<uint8_t> makeCanFrame(uint32_t canId, const std::vector<uint8_t>& data)
+    {
+        std::vector<uint8_t> frame;
+        frame.reserve(4 + data.size());
+        frame.push_back(static_cast<uint8_t>((canId >> 24) & 0xFF));
+        frame.push_back(static_cast<uint8_t>((canId >> 16) & 0xFF));
+        frame.push_back(static_cast<uint8_t>((canId >> 8) & 0xFF));
+        frame.push_back(static_cast<uint8_t>(canId & 0xFF));
+        frame.insert(frame.end(), data.cbegin(), data.cend());
+        return frame;
+    }
+
+    uint32_t canIdFromFrame(const PASSTHRU_MSG& msg)
+    {
+        if (msg.DataSize < 4) {
+            throw std::runtime_error("Short CAN frame");
+        }
+        return (static_cast<uint32_t>(msg.Data[0]) << 24)
+            | (static_cast<uint32_t>(msg.Data[1]) << 16)
+            | (static_cast<uint32_t>(msg.Data[2]) << 8)
+            | static_cast<uint32_t>(msg.Data[3]);
+    }
+
     static bool readCheckAndGetImpl(
         const j2534::J2534Channel& channel,
         const std::vector<uint8_t> msgId,
@@ -593,28 +921,7 @@ namespace common {
 
     CarPlatform parseCarPlatform(std::string input)
     {
-        input = toLower(input);
-        if ("p1" == input)
-            return common::CarPlatform::P1;
-        else if ("p1_uds" == input)
-            return common::CarPlatform::P1_UDS;
-        else if ("p2" == input)
-            return common::CarPlatform::P2;
-        else if ("p2_250" == input)
-            return common::CarPlatform::P2_250;
-        else if ("p2_uds" == input)
-            return common::CarPlatform::P2_UDS;
-        else if ("p3" == input)
-            return common::CarPlatform::P3;
-        else if ("spa" == input)
-            return common::CarPlatform::SPA;
-        else if ("ford_kwp" == input)
-            return common::CarPlatform::Ford_KWP;
-        else if ("ford_uds" == input)
-            return common::CarPlatform::Ford_UDS;
-        else if ("haval_uds" == input)
-            return common::CarPlatform::Haval_UDS;
-        return common::CarPlatform::Undefined;
+        return parseCarPlatformImpl(std::move(input), true);
     }
 
     static std::string getCarPlatformName(CarPlatform carPlatform)
@@ -680,7 +987,42 @@ namespace common {
             }
         }
         const auto platformName = getCarPlatformName(carPlatform);
-        throw std::runtime_error((std::stringstream() << "Can'f find ECU with id = " << ecuId + ", for platform = " << platformName).str());
+        throw std::runtime_error((std::stringstream() << "Can't find ECU with id = " << ecuId << ", for platform = " << platformName).str());
+    }
+
+    BusConfiguration getBusByName(CarPlatform carPlatform, const std::string& busName)
+    {
+        const auto configuration = getConfigurationInfoByCarPlatform(carPlatform);
+        const auto normalizedBusName = toLower(trim(busName));
+        std::vector<BusConfiguration> matches;
+        for (const auto& bus : configuration.busInfo) {
+            if (toLower(bus.name) == normalizedBusName) {
+                matches.push_back(bus);
+            }
+        }
+        if (matches.empty()) {
+            std::stringstream ss;
+            ss << "Can't find bus \"" << busName << "\". Available buses:";
+            for (const auto& bus : configuration.busInfo) {
+                ss << "\n    " << bus.name;
+            }
+            throw std::runtime_error(ss.str());
+        }
+        if (matches.size() > 1) {
+            throw std::runtime_error("Bus name is ambiguous: " + busName);
+        }
+        return matches.front();
+    }
+
+    void ensureCanIdFitsBus(uint32_t canId, const BusConfiguration& bus)
+    {
+        const uint32_t maxId = bus.canIdBitSize == 29 ? 0x1FFFFFFFu : 0x7FFu;
+        if (canId > maxId) {
+            std::stringstream ss;
+            ss << "CAN id 0x" << std::hex << canId << " does not fit bus \"" << bus.name
+               << "\" (" << std::dec << bus.canIdBitSize << "-bit)";
+            throw std::runtime_error(ss.str());
+        }
     }
 
     size_t getChannelIndexByEcuId(CarPlatform carPlatform, uint32_t ecuId,
@@ -692,7 +1034,14 @@ namespace common {
                 return i;
             }
         }
-        throw std::runtime_error((std::stringstream() << "Can'f find opened channel with baudrate = " << busInfo.baudrate).str());
+        // A baudrate override collapses every channel onto the same speed, so the
+        // configured bus baudrate no longer identifies a channel. When only one
+        // channel is open there is no ambiguity; otherwise fail loudly.
+        if (channels.size() == 1) {
+            return 0;
+        }
+        throw std::runtime_error((std::stringstream() << "Can't find opened channel with baudrate = " << busInfo.baudrate
+            << " (a baudrate override may have made channels indistinguishable by speed)").str());
     }
 
     j2534::J2534Channel& getChannelByEcuId(CarPlatform carPlatform, uint32_t ecuId,
@@ -827,33 +1176,18 @@ namespace common {
 
     CarPlatform parsePlatform(std::string input)
     {
-        input = toLower(input);
-        if ("p1" == input)
-            return common::CarPlatform::P1;
-        else if ("p1_uds" == input)
-            return common::CarPlatform::P1_UDS;
-        else if ("p2" == input)
-            return common::CarPlatform::P2;
-        else if ("p2_250" == input)
-            return common::CarPlatform::P2_250;
-        else if ("p2_uds" == input)
-            return common::CarPlatform::P2_UDS;
-        else if ("p3" == input)
-            return common::CarPlatform::P3;
-        else if ("spa" == input)
-            return common::CarPlatform::SPA;
-        else if ("ford_kwp" == input)
-            return common::CarPlatform::Ford_KWP;
-        else if ("ford_uds" == input)
-            return common::CarPlatform::Ford_UDS;
-        else if ("haval_uds" == input)
-            return common::CarPlatform::Haval_UDS;
-        return common::CarPlatform::Undefined;
+        return parseCarPlatformImpl(std::move(input), false);
     }
 
     std::array<uint8_t, 5> getPinArray(uint64_t pin)
     {
-        return { (pin >> 32) & 0xFF, (pin >> 24) & 0xFF, (pin >> 16) & 0xFF, (pin >> 8) & 0xFF, pin & 0xFF };
+        return {
+            static_cast<uint8_t>((pin >> 32) & 0xFF),
+            static_cast<uint8_t>((pin >> 24) & 0xFF),
+            static_cast<uint8_t>((pin >> 16) & 0xFF),
+            static_cast<uint8_t>((pin >> 8) & 0xFF),
+            static_cast<uint8_t>(pin & 0xFF)
+        };
     }
 
     void initLogger(const std::string& logFilename, bool debugLogging)
@@ -862,6 +1196,9 @@ namespace common {
         defaultConf.setToDefault();
         defaultConf.setGlobally(el::ConfigurationType::Format, "%datetime %level %msg");
         defaultConf.setGlobally(el::ConfigurationType::Filename, logFilename);
+        // Keep stdout clean for structured (CSV) command output; logs go to file only.
+        // Fatal/error conditions are still surfaced to stderr by the command layer.
+        defaultConf.setGlobally(el::ConfigurationType::ToStandardOutput, "false");
         defaultConf.set(el::Level::Debug, el::ConfigurationType::Enabled, debugLogging ? "true" : "false");
         defaultConf.set(el::Level::Trace, el::ConfigurationType::Enabled, debugLogging ? "true" : "false");
         el::Loggers::reconfigureAllLoggers(defaultConf);

@@ -35,7 +35,7 @@ UDSRequestRxTimeout::UDSRequestRxTimeout(const std::string& message)
 
 namespace {
 
-constexpr char kChannelReadTimeoutText[] = "Failed to read data from CAN channel";
+constexpr char kChannelReadTimeoutText[] = "Timed out waiting for data from CAN channel";
 
 template <typename Reader>
 void readMsgsTranslatingTimeout(Reader&& reader)
@@ -45,7 +45,7 @@ void readMsgsTranslatingTimeout(Reader&& reader)
     }
     catch (const std::runtime_error& ex) {
         if (std::string(ex.what()) == kChannelReadTimeoutText) {
-            throw UDSRequestRxTimeout(ex.what());
+            throw UDSRequestRxTimeout("UDS RX timeout waiting for matching response");
         }
         throw;
     }
@@ -99,7 +99,7 @@ std::vector<uint8_t> UDSRequest::process(const j2534::J2534Channel& channel, siz
     if(writeStatus != STATUS_NOERROR || numMsgs < 1) {
         LOG(ERROR) << "UDS TX failed can=0x" << std::hex << _canId
                    << " status=" << j2534StatusToString(writeStatus) << " written=" << std::dec << numMsgs;
-        throw UDSRequestTxError(writeStatus, numMsgs, "Failed to send CAN message: " + j2534StatusToString(writeStatus));
+        throw UDSRequestTxError(writeStatus, numMsgs, "UDS TX failed: " + j2534StatusToString(writeStatus));
     }
     std::vector<uint8_t> result;
     readMsgsTranslatingTimeout([&]() {
@@ -148,7 +148,7 @@ std::vector<uint8_t> UDSRequest::process(const j2534::J2534Channel& channel,
     if(writeStatus != STATUS_NOERROR || numMsgs < 1) {
         LOG(ERROR) << "UDS TX failed can=0x" << std::hex << _canId
                    << " status=" << j2534StatusToString(writeStatus) << " written=" << std::dec << numMsgs;
-        throw UDSRequestTxError(writeStatus, numMsgs, "Failed to send CAN message: " + j2534StatusToString(writeStatus));
+        throw UDSRequestTxError(writeStatus, numMsgs, "UDS TX failed: " + j2534StatusToString(writeStatus));
     }
     std::vector<uint8_t> result;
     bool acceptedResponse = false;
