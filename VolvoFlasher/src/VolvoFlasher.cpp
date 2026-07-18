@@ -138,13 +138,36 @@ void ensureOutputDirectoryExists(const std::string& path)
 void UDSProgramMode(common::CarPlatform carPlatform, uint8_t ecuId, j2534::J2534& j2534,
 	unsigned long holdSeconds);
 
+// Parses a UDS diagnostic session spec into its subfunction byte; "none" -> 0.
+uint8_t parseUdsSessionByte(const std::string& input) {
+	const auto value = common::toLower(input);
+	if (value == "none") {
+		return 0x00;
+	}
+	if (value == "default") {
+		return 0x01;
+	}
+	if (value == "programming") {
+		return 0x02;
+	}
+	if (value == "ext" || value == "extended") {
+		return 0x03;
+	}
+	const auto numeric = common::parseHexU32(value);
+	if (numeric == 0 || numeric > 0x7F) {
+		throw std::runtime_error("--session must be none|default|programming|ext|extended or a hex byte 01-7F");
+	}
+	return static_cast<uint8_t>(numeric);
+}
+
 bool getRunOptions(int argc, const char* argv[], std::string& deviceName,
 	unsigned long& baudrate, std::string& flashPath, uint64_t& pin,
 	uint8_t& ecuId, unsigned long& start, unsigned long& datasize,
 	RunMode& runMode, std::string& sblPath, common::CarPlatform& carPlatform,
 	bool& pinUpward, bool& resetFunctional, unsigned long& programHoldSeconds,
 	ProgramMode& flashProgramMode, ReadFormat& readFormat,
-	std::vector<std::string>& rawData, bool& noWakeup, bool& attachRunningSbl) {
+	std::vector<std::string>& rawData, bool& noWakeup, bool& attachRunningSbl,
+	bool& udsRawWake, uint8_t& udsRawSession) {
 	argparse::ArgumentParser program("VolvoFlasher", "1.0", argparse::default_arguments::help);
     const auto addDebugArgument = [](argparse::ArgumentParser& parser) {
         parser.add_argument("--debug").default_value(false).implicit_value(true).nargs(0)
@@ -218,6 +241,10 @@ bool getRunOptions(int argc, const char* argv[], std::string& deviceName,
 		.help("Programming mode handling when --sbl is used: vehicle or bench");
 	uds_raw_command.add_argument("--no-wakeup").default_value(false).implicit_value(true).nargs(0)
 		.help("Do not send wakeUp/reset cleanup after --sbl raw session");
+	uds_raw_command.add_argument("--wake").default_value(false).implicit_value(true).nargs(0)
+		.help("Send a functional wake burst (7DF 10 82) on the ECU bus before the raw request(s)");
+	uds_raw_command.add_argument("--session").default_value(std::string{ "none" })
+		.help("Enter a diagnostic session first: none|default|programming|ext|extended (or hex 01-7F)");
 
 	program.add_subparser(flash_command);
 	program.add_subparser(read_command);
@@ -273,6 +300,8 @@ bool getRunOptions(int argc, const char* argv[], std::string& deviceName,
 			sblPath = uds_raw_command.get<std::string>("--sbl");
 			flashProgramMode = parseProgramMode(uds_raw_command.get<std::string>("--program-mode"));
 			noWakeup = uds_raw_command.get<bool>("--no-wakeup");
+			udsRawWake = uds_raw_command.get<bool>("--wake");
+			udsRawSession = parseUdsSessionByte(uds_raw_command.get<std::string>("--session"));
 			runMode = RunMode::UdsRaw;
 		}
 		else {
@@ -1071,9 +1100,29 @@ void warmupPostStartRawChannel(common::J2534ChannelProvider& channelProvider,
 	LOG(INFO) << "post-start warmup done";
 }
 
+// Functional wake burst (single-frame ISO-TP 10 82 on 0x7DF), mirroring VolvoDiag's
+// prelude --wake, to bring a sleeping/uninitialised bus up before raw requests.
+void sendUdsRawWakeBurst(j2534::J2534& j2534, common::CarPlatform carPlatform, uint8_t ecuId)
+{
+	const auto bus = std::get<0>(common::getEcuInfoByEcuId(carPlatform, ecuId));
+	auto rawChannel = common::openRawCanChannel(j2534, bus);
+	const std::vector<uint8_t> wakeFrame = common::makeCanFrame(0x7DF, { 0x02, 0x10, 0x82, 0, 0, 0, 0, 0 });
+	constexpr size_t burstCount = 10;
+	for (size_t i = 0; i < burstCount; ++i) {
+		const auto status = rawChannel->writeMsg(wakeFrame, 1000);
+		if (status != STATUS_NOERROR) {
+			throw std::runtime_error("Failed to send wake frame: " + common::j2534StatusToString(status));
+		}
+		if (i + 1 < burstCount) {
+			std::this_thread::sleep_for(std::chrono::milliseconds(20));
+		}
+	}
+	LOG(INFO) << "uds-raw wake burst sent (7DF 10 82 x" << burstCount << ")";
+}
+
 void UDSRaw(common::CarPlatform carPlatform, uint8_t ecuId, j2534::J2534& j2534,
 	uint64_t pin, const std::vector<std::string>& rawData, const std::string& sblPath,
-	ProgramMode programMode, bool noWakeup)
+	ProgramMode programMode, bool noWakeup, bool wake, uint8_t session)
 {
 	const auto ecuInfo{ common::getEcuInfoByEcuId(carPlatform, ecuId) };
 	if (std::get<0>(ecuInfo).protocolId != ISO15765) {
@@ -1082,6 +1131,10 @@ void UDSRaw(common::CarPlatform carPlatform, uint8_t ecuId, j2534::J2534& j2534,
 	const auto canId = std::get<1>(ecuInfo).canId;
 	if (rawData.empty()) {
 		throw std::runtime_error("uds-raw requires at least one --data");
+	}
+
+	if (wake) {
+		sendUdsRawWakeBurst(j2534, carPlatform, ecuId);
 	}
 
 	bool skipFallAsleep = false;
@@ -1128,6 +1181,20 @@ void UDSRaw(common::CarPlatform carPlatform, uint8_t ecuId, j2534::J2534& j2534,
 			throw std::runtime_error("SBL start failed");
 		}
 		warmupPostStartRawChannel(channelProvider, channels, ecuId, canId);
+	}
+
+	if (session != 0) {
+		if (!runUdsProbe(channel, canId, "Session", { 0x10, session }, { session }, 3000)) {
+			throw std::runtime_error("Failed to enter requested diagnostic session");
+		}
+	}
+
+	if (sblPath.empty() && !wake && session == 0) {
+		LOG(WARNING) << "uds-raw sending without any wake/session prelude; "
+			<< "if the bus is asleep or uninitialised the request will just time out "
+			<< "(see --wake / --session)";
+		std::cerr << "warning: no wake/session prelude; a timeout may mean the bus "
+			<< "was never activated (try --wake / --session)" << std::endl;
 	}
 
 	try {
@@ -1734,10 +1801,13 @@ int main(int argc, const char* argv[]) {
 	std::vector<std::string> rawData;
 	bool noWakeup = false;
 	bool attachRunningSbl = false;
+	bool udsRawWake = false;
+	uint8_t udsRawSession = 0;
 	const auto devices = common::getAvailableDevices();
 	if (getRunOptions(argc, argv, deviceName, baudrate, flashPath, pin, ecuId, start, datasize,
 		runMode, sblPath, carPlatform, scanPinsUpward, resetFunctional, programHoldSeconds, flashProgramMode,
-		readFormat, rawData, noWakeup, attachRunningSbl)) {
+		readFormat, rawData, noWakeup, attachRunningSbl,
+		udsRawWake, udsRawSession)) {
 		j2534::DeviceInfo device;
 		try {
 			device = common::selectSingleDevice(devices, deviceName);
@@ -1798,7 +1868,8 @@ int main(int argc, const char* argv[]) {
 				UDSProgramMode(carPlatform, ecuId, *j2534, programHoldSeconds);
 			}
 			else if (runMode == RunMode::UdsRaw) {
-				UDSRaw(carPlatform, ecuId, *j2534, pin, rawData, sblPath, flashProgramMode, noWakeup);
+				UDSRaw(carPlatform, ecuId, *j2534, pin, rawData, sblPath, flashProgramMode, noWakeup,
+					udsRawWake, udsRawSession);
 			}
 		}
 		catch (const std::exception& ex) {
