@@ -4,20 +4,24 @@
 #include <logger/LogParameters.hpp>
 #include <logger/Logger.hpp>
 #include <logger/LoggerCallback.hpp>
+#include <common/CliSupport.hpp>
 #include <common/J2534ChannelProvider.hpp>
 #include <common/RuntimeDiagnostics.hpp>
 #include <common/Util.hpp>
+#include <common/DeviceInfo.hpp>
 #include <j2534/J2534.hpp>
 
 #include <argparse/argparse.hpp>
 
 #include <easylogging++.h>
 
-#include <algorithm>
-#include <atomic>
+#include <chrono>
+#include <filesystem>
 #include <iomanip>
 #include <iostream>
 #include <memory>
+#include <optional>
+#include <sstream>
 #include <string>
 #include <thread>
 
@@ -27,15 +31,6 @@
 #include <windows.h>
 
 INITIALIZE_EASYLOGGINGPP
-
-std::atomic_bool stopRequested{ false };
-
-bool isDebugLoggingRequested(int argc, const char* argv[])
-{
-  return std::any_of(argv + 1, argv + argc, [](const char* arg) {
-    return std::string(arg) == "--debug";
-  });
-}
 
 class ConsoleLogWriter final : public logger::LoggerCallback {
 public:
@@ -57,29 +52,88 @@ private:
   const size_t _printLimit;
 };
 
+std::string makeStartMessage(const j2534::DeviceInfo& device,
+                             const std::string& platformName,
+                             uint8_t cmId,
+                             std::chrono::milliseconds loggingInterval,
+                             std::optional<uint32_t> baudrateOverride,
+                             logger::UdsLoggerOptions udsOptions) {
+  std::stringstream ss;
+  ss << "Starting logger: device=\"" << device.deviceName
+     << "\" platform=" << platformName
+     << " ecu=0x" << std::hex << static_cast<unsigned>(cmId)
+     << std::dec << " interval-ms=" << loggingInterval.count();
+  if (baudrateOverride.has_value()) {
+    ss << " baudrate-override=" << *baudrateOverride;
+  } else {
+    ss << " baudrate=config";
+  }
+  ss << " uds-did-base=0x" << std::hex << udsOptions.didBase
+     << std::dec << " uds-did-max-data-size=" << udsOptions.didMaxDataSize;
+  return ss.str();
+}
+
 static bool getRunOptions(int argc, const char *argv[], std::string &deviceName,
-                   unsigned long &baudrate, std::string &paramsFilePath,
-                   std::string &outputPath, unsigned &printCount, common::CarPlatform& carPlatform, uint8_t& cmId) {
+                   std::optional<uint32_t> &baudrateOverride, std::string &paramsFilePath,
+                   std::string &outputPath, unsigned &printCount, common::CarPlatform& carPlatform,
+                   uint8_t& cmId, std::chrono::milliseconds& loggingInterval,
+                   bool& listDevices, std::string& platformName,
+                   logger::UdsLoggerOptions& udsOptions) {
   argparse::ArgumentParser program("VolvoLogger");
   program.add_argument("--debug").default_value(false).implicit_value(true).nargs(0)
       .help("Enable verbose debug logging");
+  program.add_argument("--list-devices").default_value(false).implicit_value(true).nargs(0)
+      .help("List available J2534 devices and exit");
   program.add_argument("-d", "--device").default_value(std::string{}).help("Device name");
-  program.add_argument("-b", "--baudrate").scan<'u', unsigned>().default_value(500000u).help("CAN bus speed");
+  program.add_argument("-b", "--baudrate").scan<'u', unsigned>().help("Override configured CAN bus speed");
   program.add_argument("-v", "--variables").help("Path to memory variables");
   program.add_argument("-o", "--output").help("Path to save logs");
   program.add_argument("-p", "--print").scan<'u', unsigned>().default_value(5u).help("Number of variables which prints to console");
   program.add_argument("-f", "--platform").default_value(std::string{"P2"}).help("Car's platform, supported values: P80, P1, P1_UDS, P2, P2_250, P2_UDS, P3, SPA");
   program.add_argument("-e", "--ecu").scan<'x', uint8_t>().default_value(uint8_t(0x7A)).help("ECU id to log");
+  program.add_argument("--interval-ms").scan<'u', unsigned>().default_value(50u).help("Logging interval in milliseconds");
+  program.add_argument("--uds-did-base").scan<'x', uint16_t>().default_value(uint16_t(0xF200)).help("Base dynamic DID for UDS logger");
+  program.add_argument("--uds-did-max-data-size").scan<'u', unsigned>().default_value(7u).help("Max bytes per dynamic DID for UDS logger");
 
   try {
       program.parse_args(argc, argv);
       deviceName = program.get<std::string>("-d");
-      baudrate = program.get<unsigned>("-b");
+      listDevices = program.is_used("--list-devices");
+      if (listDevices) {
+        return true;
+      }
+      baudrateOverride = program.is_used("-b")
+          ? std::optional<uint32_t>{program.get<unsigned>("-b")}
+          : std::nullopt;
+      if (!program.is_used("-v")) {
+        throw std::runtime_error("Missing required argument: -v/--variables");
+      }
+      if (!program.is_used("-o")) {
+        throw std::runtime_error("Missing required argument: -o/--output");
+      }
       paramsFilePath = program.get<std::string>("-v");
+      if (!std::filesystem::is_regular_file(paramsFilePath)) {
+        throw std::runtime_error("Variables file does not exist: " + paramsFilePath);
+      }
       outputPath = program.get<std::string>("-o");
+      if (outputPath.empty()) {
+        throw std::runtime_error("Log output path is empty");
+      }
       printCount = program.get<unsigned>("-p");
-      carPlatform = common::parseCarPlatform(program.get<std::string>("-f"));
+      platformName = program.get<std::string>("-f");
+      carPlatform = common::parseCarPlatform(platformName);
       cmId = program.get<uint8_t>("-e");
+      const auto intervalMs = program.get<unsigned>("--interval-ms");
+      if (intervalMs == 0) {
+        throw std::runtime_error("--interval-ms must be greater than 0");
+      }
+      loggingInterval = std::chrono::milliseconds(intervalMs);
+      udsOptions.didBase = program.get<uint16_t>("--uds-did-base");
+      const auto didMaxDataSize = program.get<unsigned>("--uds-did-max-data-size");
+      if (didMaxDataSize == 0) {
+        throw std::runtime_error("--uds-did-max-data-size must be greater than 0");
+      }
+      udsOptions.didMaxDataSize = didMaxDataSize;
       return true;
   }
   catch (const std::exception& err) {
@@ -87,15 +141,6 @@ static bool getRunOptions(int argc, const char *argv[], std::string &deviceName,
       std::cerr << program;
   }
   return false;
-}
-
-BOOL WINAPI HandlerRoutine(_In_ DWORD dwCtrlType) {
-  if (dwCtrlType == CTRL_C_EVENT || dwCtrlType == CTRL_BREAK_EVENT || dwCtrlType == CTRL_CLOSE_EVENT) {
-    const bool alreadyRequested = stopRequested.exchange(true);
-    logger::LoggerApplication::instance().stop();
-    return alreadyRequested ? FALSE : TRUE;
-  }
-  return FALSE;
 }
 
 std::string getSehModuleName(void* address)
@@ -127,73 +172,74 @@ LONG WINAPI SehLoggingFilter(EXCEPTION_POINTERS* ep) {
 }
 
 int main(int argc, const char *argv[]) {
-  common::initLogger("VolvoLogger.log", isDebugLoggingRequested(argc, argv));
+  common::initLogger("VolvoLogger.log", common::isDebugLoggingRequested(argc, argv));
   common::printRuntimeDiagnostics("VolvoLogger");
   SetUnhandledExceptionFilter(SehLoggingFilter);
-  if (!SetConsoleCtrlHandler(HandlerRoutine, TRUE)) {
-    throw std::runtime_error("Can't set console control hander");
-  }
-  unsigned long baudrate = 0;
+  common::installConsoleCtrlHandler([] {
+    logger::LoggerApplication::instance().stop();
+  });
+  std::optional<uint32_t> baudrateOverride;
   std::string deviceName;
   std::string paramsFilePath;
   std::string outputPath;
+  std::string platformName;
   common::CarPlatform carPlatform;
   uint8_t cmId;
   unsigned printCount;
+  std::chrono::milliseconds loggingInterval{50};
+  bool listDevices = false;
+  logger::UdsLoggerOptions udsOptions;
   const auto devices = common::getAvailableDevices();
-  if (getRunOptions(argc, argv, deviceName, baudrate, paramsFilePath,
-                    outputPath, printCount, carPlatform, cmId)) {
-    bool matchedDevice = false;
-    for (const auto &device : devices) {
-      if (deviceName.empty() ||
-          device.deviceName.find(deviceName) != std::string::npos) {
-        matchedDevice = true;
-        try {
-          std::unique_ptr<j2534::J2534> j2534{
-              std::make_unique<j2534::J2534>(device.libraryName)};
-          std::string name =
-              device.deviceName.find("DiCE-") != std::string::npos
-                  ? device.deviceName
-                  : "";
-          j2534->PassThruOpen(name);
-          logger::LogParameters params{paramsFilePath};
-          logger::FileLogWriter fileLogWriter(outputPath, params);
-          ConsoleLogWriter consoleLogWriter{printCount};
-          logger::LoggerApplication::instance().start(
-              baudrate, *j2534, params, carPlatform, cmId,
-              {&fileLogWriter, &consoleLogWriter});
-          while (!stopRequested.load() && logger::LoggerApplication::instance().isStarted()) {
-            std::this_thread::sleep_for(std::chrono::seconds(1));
-          }
-          logger::LoggerApplication::instance().stop();
-        } catch (const std::exception &ex) {
-          LOG(ERROR) << "Logger command failed: " << ex.what();
-          std::cout << ex.what() << std::endl;
-        } catch (const char *ex) {
-          LOG(ERROR) << "Logger command failed: " << ex;
-          std::cout << ex << std::endl;
-        } catch (...) {
-          LOG(ERROR) << "Logger command failed with unknown exception";
-          std::cout << "exception" << std::endl;
-        }
+  if (getRunOptions(argc, argv, deviceName, baudrateOverride, paramsFilePath,
+                    outputPath, printCount, carPlatform, cmId, loggingInterval,
+                    listDevices, platformName, udsOptions)) {
+    if (listDevices) {
+      common::printAvailableDevices(std::cout, devices);
+      return 0;
+    }
+    j2534::DeviceInfo device;
+    try {
+      device = common::selectSingleDevice(devices, deviceName);
+    } catch (const std::exception &ex) {
+      LOG(WARNING) << ex.what();
+      std::cout << ex.what() << std::endl;
+      if (devices.empty()) {
+        common::printJ2534ArchitectureHint(std::cout);
       }
+      return 1;
     }
-    if (!matchedDevice) {
-      const auto message = deviceName.empty()
-          ? "No J2534 devices found."
-          : "No J2534 devices matched --device \"" + deviceName + "\".";
-      LOG(WARNING) << message;
-      std::cout << message << std::endl;
-      common::printJ2534ArchitectureHint(std::cout);
-    }
-  } else {
-    std::cout << "Available J2534 devices (" << common::getProcessArchitecture()
-              << " only):" << std::endl;
-    for (const auto &device : devices) {
-      std::cout << "    " << device.deviceName << std::endl;
-    }
-    if (devices.empty()) {
-      common::printJ2534ArchitectureHint(std::cout);
+    {
+      try {
+        std::unique_ptr<j2534::J2534> j2534{
+            std::make_unique<j2534::J2534>(device.libraryName)};
+        std::string name =
+            device.deviceName.find("DiCE-") != std::string::npos
+                ? device.deviceName
+                : "";
+        j2534->PassThruOpen(name);
+        logger::LogParameters params{paramsFilePath};
+        logger::FileLogWriter fileLogWriter(outputPath, params);
+        ConsoleLogWriter consoleLogWriter{printCount};
+        const auto startMessage = makeStartMessage(device, platformName, cmId, loggingInterval, baudrateOverride, udsOptions);
+        LOG(INFO) << startMessage;
+        std::cout << startMessage << std::endl;
+        logger::LoggerApplication::instance().start(
+            baudrateOverride, loggingInterval, udsOptions, *j2534, params, carPlatform, cmId,
+            {&fileLogWriter, &consoleLogWriter});
+        while (!common::stopRequested.load() && logger::LoggerApplication::instance().isStarted()) {
+          std::this_thread::sleep_for(std::chrono::seconds(1));
+        }
+        logger::LoggerApplication::instance().stop();
+      } catch (const std::exception &ex) {
+        LOG(ERROR) << "Logger command failed: " << ex.what();
+        std::cout << ex.what() << std::endl;
+      } catch (const char *ex) {
+        LOG(ERROR) << "Logger command failed: " << ex;
+        std::cout << ex << std::endl;
+      } catch (...) {
+        LOG(ERROR) << "Logger command failed with unknown exception";
+        std::cout << "exception" << std::endl;
+      }
     }
   }
   return 0;

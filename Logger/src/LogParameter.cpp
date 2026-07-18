@@ -74,7 +74,11 @@ namespace logger {
             float_value = processSign(value, _isSigned, _size);
         }
 		if (_isInverseConversion) {
-            return _factor / (float_value + _offset);
+            const double denominator = float_value + _offset;
+            if (denominator == 0.0) {
+                return 0.0;
+            }
+            return _factor / denominator;
 		}
 		else {
             return float_value * _factor + _offset;

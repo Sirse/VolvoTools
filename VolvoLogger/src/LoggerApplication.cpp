@@ -16,14 +16,16 @@ namespace logger {
   return s_app;
 }
 
-void LoggerApplication::start(unsigned long baudrate,
+void LoggerApplication::start(std::optional<uint32_t> baudrateOverride,
+                              std::chrono::milliseconds loggingInterval,
+                              UdsLoggerOptions udsOptions,
                               j2534::J2534 &j2534,
                               const LogParameters &params,
                               const common::CarPlatform carPlatform,
                               uint32_t cmId,
                               const std::vector<LoggerCallback *> &callbacks) {
   LOG(DEBUG) << "LoggerApplication creating logger";
-  _logger = std::make_unique<Logger>(j2534, carPlatform, cmId, std::string());
+  _logger = std::make_unique<Logger>(j2534, carPlatform, cmId, std::string(), baudrateOverride, udsOptions);
   LOG(DEBUG) << "LoggerApplication registering callbacks count=" << callbacks.size();
   for (size_t i = 0; i < callbacks.size(); ++i) {
     const auto callback = callbacks[i];
@@ -36,7 +38,7 @@ void LoggerApplication::start(unsigned long baudrate,
     _logger->registerCallback(*callback);
   }
   LOG(DEBUG) << "LoggerApplication starting logger";
-  _logger->start(baudrate, params);
+  _logger->start(params, loggingInterval);
   LOG(DEBUG) << "LoggerApplication start returned";
 }
 

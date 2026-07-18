@@ -1,8 +1,11 @@
 #pragma once
 
 #include <common/CarPlatform.hpp>
+#include <logger/Logger.hpp>
 
+#include <chrono>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -19,7 +22,10 @@ class LoggerApplication final {
 public:
   static LoggerApplication &instance();
 
-  void start(unsigned long baudrate, j2534::J2534 &j2534,
+  void start(std::optional<uint32_t> baudrateOverride,
+             std::chrono::milliseconds loggingInterval,
+             UdsLoggerOptions udsOptions,
+             j2534::J2534 &j2534,
              const LogParameters &params,
              common::CarPlatform carPlatform,
              uint32_t cmId,

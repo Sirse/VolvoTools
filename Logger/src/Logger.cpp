@@ -17,6 +17,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cstdint>
+#include <stdexcept>
 #include <numeric>
 #include <ios>
 #include <sstream>
@@ -77,31 +78,46 @@ namespace logger {
 			requestMemory(j2534::J2534Channel& channel,
 				const LogParameters& parameters) override {
 			const auto numberOfCanMessages = getNumberOfCanMessages(parameters);
-			std::vector<uint32_t> result;
+			std::vector<uint32_t> result(parameters.parameters().size());
 			unsigned long writtenCount = 1;
-			channel.writeMsgs(requstMemoryMessage, writtenCount);
+			const auto writeStatus = channel.writeMsgs(requstMemoryMessage, writtenCount);
+			if (writeStatus != STATUS_NOERROR || writtenCount == 0) {
+				throw std::runtime_error("Failed to send D2 logger memory request");
+			}
 			if (writtenCount > 0) {
 				std::vector<PASSTHRU_MSG> logMessages(numberOfCanMessages);
-				channel.readMsgs(logMessages);
+				const auto readStatus = channel.readMsgs(logMessages);
+				if (readStatus != STATUS_NOERROR || logMessages.size() < numberOfCanMessages) {
+					throw std::runtime_error("Failed to read D2 logger memory response");
+				}
 
-				result.reserve(parameters.parameters().size());
+				const auto requireDataSize = [](const PASSTHRU_MSG& msg, size_t size) {
+					if (msg.DataSize < size) {
+						throw std::runtime_error("Short D2 logger memory response");
+					}
+				};
 
 				size_t paramIndex = 0;
 				size_t paramOffset = 0;
-				uint16_t value = 0;
+				uint32_t value = 0;
 				for (const auto& msg : logMessages) {
 					size_t msgOffset = 5;
+					requireDataSize(msg, 9);
 					// E6 F0 00 - read record by identifier answer
 					if (msg.Data[4] == 0x8F &&
 						msg.Data[5] == static_cast<uint8_t>(common::ECUType::ECM_ME) &&
 						msg.Data[6] == 0xE6 && msg.Data[7] == 0xF0 && msg.Data[8] == 0)
 						msgOffset = 9;
+					requireDataSize(msg, msgOffset);
 					for (size_t i = msgOffset; i < 12; ++i) {
+						if (paramIndex >= parameters.parameters().size())
+							break;
+						requireDataSize(msg, i + 1);
 						const auto& param = parameters.parameters()[paramIndex];
 						value += msg.Data[i] << ((param.size() - paramOffset - 1) * 8);
 						++paramOffset;
 						if (paramOffset >= param.size()) {
-							result.push_back(value);
+							result[paramIndex] = value;
 							++paramIndex;
 							paramOffset = 0;
 							value = 0;
@@ -136,7 +152,7 @@ namespace logger {
                         static_cast<uint8_t>(parameters.parameters()[i].size())) };
 
                 auto readResponse{ readMemoryRequest.process(channel) };
-                result[i] = common::encodeBigEndian(readResponse);
+                result[i] = common::encodeLittleEndian(readResponse);
             }
             return result;
         }
@@ -164,7 +180,7 @@ namespace logger {
 
                 auto readResponse{ readMemoryRequest.process(channel, 200, 3) };
                 readResponse.erase(readResponse.begin(), readResponse.begin() + 4);
-                result[i] = common::encodeLittleEndian(readResponse);
+                result[i] = common::encodeBigEndian(readResponse);
             }
             return result;
         }
@@ -172,12 +188,15 @@ namespace logger {
 
     class UDSLoggerImpl : public LoggerImpl {
 	public:
-        UDSLoggerImpl(uint32_t canId)
+        UDSLoggerImpl(uint32_t canId, UdsLoggerOptions options)
             : LoggerImpl()
             , _canId{ canId }
-			, _didBase(0xF200)
-            , _didMaxDataSize{ 7 }
+			, _didBase(options.didBase)
+            , _didMaxDataSize{ options.didMaxDataSize }
 		{
+            if (_didMaxDataSize == 0) {
+                throw std::runtime_error("UDS DID max data size must be greater than 0");
+            }
 		}
 
 	private:
@@ -187,6 +206,12 @@ namespace logger {
          * @return
          */
         size_t getFittingDidIndex(const LogParameter& logParameter) {
+            if (logParameter.size() > _didMaxDataSize) {
+                throw std::runtime_error("Parameter \"" + logParameter.name()
+                    + "\" of size " + std::to_string(logParameter.size())
+                    + " does not fit into a single UDS DID (max " + std::to_string(_didMaxDataSize)
+                    + " bytes); increase --uds-did-max-data-size");
+            }
             uint16_t maxId = _didBase - 1;
             for(size_t i = 0; i < _didRequests.size(); ++i) {
                 if(_didRequests[i].freeSize >= logParameter.size()) {
@@ -242,14 +267,13 @@ namespace logger {
 			requestMemory(j2534::J2534Channel& channel,
 				const LogParameters& parameters) override {
             std::vector<uint32_t> result(parameters.parameters().size());
-			size_t paramIndex = 0;
-			size_t paramOffset = 0;
-			uint32_t value = 0;
             for (const auto& didRequest: _didRequests) {
                 const auto did = didRequest.didId;
                 common::UDSRequest requestDid{_canId, { 0x22, static_cast<uint8_t>(did >> 8), static_cast<uint8_t>(did) }};
                 const auto data{requestDid.process(channel)};
                 size_t paramIndex = 0;
+                size_t paramOffset = 0;
+                uint32_t value = 0;
                 for(size_t i = 7; i < data.size(); ++i) {
                     const size_t initialParamIndex{didRequest.paramIndexes[paramIndex]};
                     const auto& param = parameters.parameters()[initialParamIndex];
@@ -312,7 +336,7 @@ namespace logger {
         virtual std::vector<uint32_t>
         requestMemory(j2534::J2534Channel& channel,
                       const LogParameters& parameters) override {
-            std::vector<uint32_t> result;
+            std::vector<uint32_t> result(parameters.parameters().size());
             constexpr uint8_t addrLength = 4;
             constexpr uint8_t dataLength = 1;
             constexpr uint8_t dataFormat = (dataLength << 4) + addrLength;
@@ -335,7 +359,7 @@ namespace logger {
                         value += data[j] << (paramOffset * 8);
                         ++paramOffset;
                         if (paramOffset >= param.size()) {
-                            result.push_back(value);
+                            result[i] = value;
                             break;
                         }
                     }
@@ -352,7 +376,8 @@ namespace logger {
         const uint32_t _canId;
     };
 
-    std::unique_ptr<LoggerImpl> createLoggerImpl(common::CarPlatform carPlatform, uint32_t cmId, const std::string& cmInfo)
+    std::unique_ptr<LoggerImpl> createLoggerImpl(common::CarPlatform carPlatform, uint32_t cmId,
+                                                 const std::string& cmInfo, UdsLoggerOptions udsOptions)
 	{
 		using common::CarPlatform;
 		if (cmId == 0x7A && (carPlatform == CarPlatform::P80 || carPlatform == CarPlatform::P1
@@ -369,8 +394,8 @@ namespace logger {
 			}
         }
         const common::ECUInfo ecuInfo{ std::get<1>(common::getEcuInfoByEcuId(carPlatform, cmId)) };
-        if (carPlatform == CarPlatform::P3 || carPlatform == CarPlatform::Ford_UDS || carPlatform == CarPlatform::VAG) {
-            return std::make_unique<UDSLoggerImpl>(ecuInfo.canId);
+        if (carPlatform == CarPlatform::P3 || carPlatform == CarPlatform::Ford_UDS) {
+            return std::make_unique<UDSLoggerImpl>(ecuInfo.canId, udsOptions);
         }
         else if (carPlatform == CarPlatform::Haval_UDS) {
             return std::make_unique<UDSSlowLoggerImpl>(ecuInfo.canId);
@@ -395,14 +420,18 @@ namespace logger {
 		}
 	}
 
-    Logger::Logger(j2534::J2534& j2534, common::CarPlatform carPlatform, uint32_t ecuId, const std::string& cmInfo)
-        : _j2534ChannelProvider{ j2534, carPlatform }
+    Logger::Logger(j2534::J2534& j2534, common::CarPlatform carPlatform, uint32_t ecuId,
+                   const std::string& cmInfo, std::optional<uint32_t> baudrateOverride,
+                   UdsLoggerOptions udsOptions)
+        : _j2534ChannelProvider{ j2534, carPlatform, baudrateOverride }
 		, _carPlatform{ carPlatform }
 		, _ecuId{ ecuId }
 		, _cmInfo{ cmInfo }
+		, _loggingInterval{ std::chrono::milliseconds(50) }
+		, _udsOptions{ udsOptions }
 		, _loggingThread{}
 		, _stopped{ true }
-        , _loggerImpl(createLoggerImpl(_carPlatform, _ecuId, _cmInfo)) {
+        , _loggerImpl(createLoggerImpl(_carPlatform, _ecuId, _cmInfo, _udsOptions)) {
         LOG(DEBUG) << "Logger ctor done";
 	}
 
@@ -426,13 +455,17 @@ namespace logger {
 			_callbacks.end());
 	}
 
-	void Logger::start(unsigned long baudrate, const LogParameters& parameters) {
+	void Logger::start(const LogParameters& parameters, std::chrono::milliseconds loggingInterval) {
 		std::unique_lock<std::mutex> lock{ _mutex };
 		if (!_stopped) {
 			throw std::runtime_error("Logging already started");
 		}
+		if (loggingInterval.count() <= 0) {
+			throw std::runtime_error("Logging interval must be positive");
+		}
 
 		_parameters = parameters;
+		_loggingInterval = loggingInterval;
 		_stopped = false;
 
 		_callbackThread = std::thread([this]() { callbackFunction(); });
@@ -487,7 +520,9 @@ namespace logger {
 			registerParameters(*channel);
 			LOG(INFO) << "Logger loop enter";
 			const auto startTimepoint{ std::chrono::steady_clock::now() };
-			for (size_t timeoffset = 0; errorCount < maxErrorCount; timeoffset += 50) {
+			const auto loggingInterval = _loggingInterval;
+			auto nextWakeup = startTimepoint + loggingInterval;
+			while (errorCount < maxErrorCount) {
 				{
 					std::unique_lock<std::mutex> lock{ _mutex };
 					if (_stopped)
@@ -512,8 +547,11 @@ namespace logger {
 					++errorCount;
 				}
 				std::unique_lock<std::mutex> lock{ _mutex };
-				_cond.wait_until(lock,
-					startTimepoint + std::chrono::milliseconds(timeoffset));
+				_cond.wait_until(lock, nextWakeup);
+				const auto now = std::chrono::steady_clock::now();
+				do {
+					nextWakeup += loggingInterval;
+				} while (nextWakeup <= now);
 			}
 			LOG(INFO) << "Logger loop exit, errorCount=" << errorCount;
 		}
@@ -579,8 +617,8 @@ namespace logger {
 				logRecord = _loggedRecords.front();
 				_loggedRecords.pop_front();
 			}
-			std::vector<double> formattedValues(logRecord.values.size());
-			for (size_t i = 0; i < logRecord.values.size(); ++i) {
+			std::vector<double> formattedValues(_parameters.parameters().size());
+			for (size_t i = 0; i < formattedValues.size() && i < logRecord.values.size(); ++i) {
 				formattedValues[i] =
 					_parameters.parameters()[i].formatValue(logRecord.values[i]);
 			}

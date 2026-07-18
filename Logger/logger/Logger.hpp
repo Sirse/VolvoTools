@@ -11,6 +11,7 @@
 #include <deque>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <thread>
 #include <vector>
 
@@ -21,15 +22,22 @@ namespace logger {
 
 	class LoggerImpl;
 
+	struct UdsLoggerOptions {
+		uint16_t didBase = 0xF200;
+		size_t didMaxDataSize = 7;
+	};
+
 	class Logger final {
 	public:
-        explicit Logger(j2534::J2534& j2534, common::CarPlatform carPlatform, uint32_t ecuId, const std::string& cmInfo);
+        explicit Logger(j2534::J2534& j2534, common::CarPlatform carPlatform, uint32_t ecuId,
+                        const std::string& cmInfo, std::optional<uint32_t> baudrateOverride = std::nullopt,
+                        UdsLoggerOptions udsOptions = {});
 		~Logger();
 
 		void registerCallback(LoggerCallback& callback);
 		void unregisterCallback(LoggerCallback& callback);
 
-		void start(unsigned long baudrate, const LogParameters& parameters);
+		void start(const LogParameters& parameters, std::chrono::milliseconds loggingInterval);
 		void stop();
 		bool isStarted() const;
 
@@ -57,6 +65,8 @@ namespace logger {
         uint32_t _ecuId;
 		std::string _cmInfo;
 		LogParameters _parameters;
+		std::chrono::milliseconds _loggingInterval;
+		UdsLoggerOptions _udsOptions;
 		std::thread _loggingThread;
 		std::thread _callbackThread;
 		mutable std::mutex _mutex;
