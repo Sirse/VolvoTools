@@ -24,6 +24,16 @@ void setFailure(const std::string& message, const std::function<void(const std::
     throw std::runtime_error(message);
 }
 
+bool hasSecurityPin(const std::array<uint8_t, 5>& pin)
+{
+    for (const auto byte : pin) {
+        if (byte != 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
 }
 
 UDSReader::UDSReader(j2534::J2534& j2534, FlasherParameters&& flasherParameters,
@@ -75,7 +85,7 @@ void UDSReader::startImpl(std::vector<std::unique_ptr<j2534::J2534Channel>>& cha
 
         if (_udsReaderParameters.attachRunningSbl) {
             setCurrentState(FlasherState::FallAsleep);
-            LOG(INFO) << "Attaching to already running UDS SBL, skipping fallAsleep/authorize/load/start";
+            LOG(INFO) << "Attaching to already running UDS SBL, skipping fallAsleep/load/start";
         }
         else if (_udsReaderParameters.skipFallAsleep) {
             setCurrentState(FlasherState::FallAsleep);
@@ -92,8 +102,13 @@ void UDSReader::startImpl(std::vector<std::unique_ptr<j2534::J2534Channel>>& cha
             getFlasherParameters().ecuId, channels) };
 
         if (_udsReaderParameters.attachRunningSbl) {
-            if (_udsReaderParameters.noSblAuth) {
-                LOG(INFO) << "Skipping running-SBL SecurityAccess (--no-sbl-auth): resident SBL does not implement 0x27";
+            // A resident/read SBL usually does not implement 0x27, and attaching means it is
+            // already up. Only re-authorize when a PIN was actually given and --no-sbl-auth
+            // was not set; otherwise a doomed 27 01 just fails and triggers wakeUp cleanup.
+            if (_udsReaderParameters.noSblAuth || !hasSecurityPin(_udsReaderParameters.pin)) {
+                LOG(INFO) << "Skipping running-SBL SecurityAccess ("
+                          << (_udsReaderParameters.noSblAuth ? "--no-sbl-auth" : "no PIN provided")
+                          << "), going straight to upload";
             }
             else {
                 setCurrentState(FlasherState::Authorize);
