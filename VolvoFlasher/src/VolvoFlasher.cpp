@@ -11,6 +11,7 @@
 #include <common/protocols/UDSPinFinder.hpp>
 #include <common/protocols/UDSRequest.hpp>
 #include <common/CommonData.hpp>
+#include <common/CliSupport.hpp>
 #include <common/J2534ChannelProvider.hpp>
 #include <common/RuntimeDiagnostics.hpp>
 #include <common/VBFParser.hpp>
@@ -33,9 +34,8 @@
 
 #include <easylogging++.h>
 
-#include <algorithm>
-#include <atomic>
 #include <cctype>
+#include <charconv>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -54,15 +54,6 @@
 #include <windows.h>
 
 INITIALIZE_EASYLOGGINGPP
-
-std::atomic_bool stopRequested{ false };
-
-bool isDebugLoggingRequested(int argc, const char* argv[])
-{
-    return std::any_of(argv + 1, argv + argc, [](const char* arg) {
-        return std::string(arg) == "--debug";
-    });
-}
 
 enum class RunMode
 {
@@ -89,22 +80,6 @@ enum class ReadFormat
 	Hex,
 	Bin
 };
-
-bool waitForStopOrTimeout(std::chrono::milliseconds duration)
-{
-	const auto deadline = std::chrono::steady_clock::now() + duration;
-	while (std::chrono::steady_clock::now() < deadline) {
-		if (stopRequested.load()) {
-			return true;
-		}
-		const auto remaining = deadline - std::chrono::steady_clock::now();
-		const auto sleepTime = std::max(std::chrono::milliseconds(1),
-			std::min(std::chrono::milliseconds(100),
-				std::chrono::duration_cast<std::chrono::milliseconds>(remaining)));
-		std::this_thread::sleep_for(sleepTime);
-	}
-	return stopRequested.load();
-}
 
 ProgramMode parseProgramMode(const std::string& input)
 {
@@ -177,9 +152,9 @@ bool getRunOptions(int argc, const char* argv[], std::string& deviceName,
     };
     addDebugArgument(program);
 	program.add_argument("-d", "--device").default_value(std::string{}).help("Device name");
-	program.add_argument("-b", "--baudrate").scan<'u', unsigned long>().default_value(500000u).help("CAN bus speed");
+	program.add_argument("-b", "--baudrate").scan<'u', unsigned long>().default_value(500000ul).help("CAN bus speed");
 	program.add_argument("-f", "--platform").default_value(std::string{ "P2" }).help("Car's platform, supported values: P80, P1, P1_UDS, P2, P2_250, P2_UDS, P3, SPA");
-	program.add_argument("-e", "--ecu").scan<'x', uint8_t>().default_value(0x7A).help("ECU id");
+	program.add_argument("-e", "--ecu").scan<'x', unsigned int>().default_value(0x7Au).help("ECU id, hexadecimal byte");
 	program.add_argument("-p", "--pin").scan<'x', uint64_t>().default_value(static_cast<uint64_t>(0)).help("PIN to unlock ECU");
 
 	argparse::ArgumentParser flash_command("flash", "1.0", argparse::default_arguments::help);
@@ -305,8 +280,12 @@ bool getRunOptions(int argc, const char* argv[], std::string& deviceName,
 			return false;
 		}
 		deviceName = program.get("-d");
-		baudrate = program.get<unsigned>("-b");
-		ecuId = program.get<uint8_t>("-e");
+		baudrate = program.get<unsigned long>("-b");
+		const auto parsedEcuId = program.get<unsigned int>("-e");
+		if (parsedEcuId > 0xFF) {
+			throw std::runtime_error("ECU id is out of range: " + std::to_string(parsedEcuId));
+		}
+		ecuId = static_cast<uint8_t>(parsedEcuId);
 		carPlatform = common::parseCarPlatform(program.get<std::string>("-f"));
 		pin = program.get<uint64_t>("-p");
 		return true;
@@ -593,6 +572,9 @@ J2534_ERROR_CODE sendMessage(j2534::J2534Channel& channel, unsigned long protoco
 {
 	PASSTHRU_MSG msg;
 	memset(&msg, 0, sizeof(msg));
+	if (data.size() > sizeof(msg.Data) - 2) {
+		throw std::runtime_error("Message payload is too large: " + std::to_string(data.size()) + " bytes");
+	}
 	for (size_t i = 0; i < data.size(); ++i) {
 		msg.Data[i + 2] = data[i];
 	}
@@ -744,7 +726,8 @@ void findPin2(j2534::J2534& j2534, common::CarPlatform carPlatform, uint8_t ecuI
 			if (!(currentPin & 0xFF)) {
 				const auto now = std::chrono::steady_clock::now();
 				uint64_t pinDiff = currentPin > savedPin ? currentPin - savedPin : savedPin - currentPin;
-				const auto pinPerSec = pinDiff / ((now - savedTime).count() / 1000000000);
+				const auto elapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(now - savedTime).count();
+				const auto pinPerSec = elapsedMs > 0 ? pinDiff * 1000 / static_cast<uint64_t>(elapsedMs) : 0;
 				savedPin = currentPin;
 				savedTime = now;
 				std::cout << "Trying PIN " << std::hex << currentPin << ", " << std::dec << pinPerSec << " pins/sec" << std::endl;
@@ -758,9 +741,9 @@ void findPin2(j2534::J2534& j2534, common::CarPlatform carPlatform, uint8_t ecuI
 	}
 	else {
 		while (pinFinder.getCurrentState() != common::UDSPinFinder::State::Done && pinFinder.getCurrentState() != common::UDSPinFinder::State::Error) {
-			if (stopRequested.load()) {
+			if (common::stopRequested.load()) {
 				pinFinder.stop();
-				stopRequested.store(false);
+				common::resetStopRequested();
 			}
 			std::this_thread::sleep_for(std::chrono::milliseconds(100));
 		}
@@ -877,7 +860,7 @@ void doSomeStuff(std::unique_ptr<j2534::J2534> j2534, uint64_t pin)
 	while (flasher.getCurrentState() !=
 		flasher::FlasherState::Done && flasher.getCurrentState() !=
 		flasher::FlasherState::Error) {
-		if (waitForStopOrTimeout(std::chrono::seconds(1))) {
+		if (common::waitForStopOrTimeout(std::chrono::seconds(1))) {
 			break;
 		}
 		std::cout << ".";
@@ -1013,31 +996,7 @@ bool runUdsProbe(const j2534::J2534Channel& channel, uint32_t canId,
 	return false;
 }
 
-std::vector<uint8_t> parseHexBytes(const std::string& input)
-{
-	std::string normalized;
-	normalized.reserve(input.size());
-	for (char ch : input) {
-		if (std::isxdigit(static_cast<unsigned char>(ch))) {
-			normalized.push_back(ch);
-		}
-		else if (ch == 'x' || ch == 'X') {
-			if (!normalized.empty() && normalized.back() == '0') {
-				normalized.pop_back();
-			}
-		}
-	}
-	if (normalized.empty() || (normalized.size() % 2) != 0) {
-		throw std::runtime_error("Invalid hex byte string: " + input);
-	}
-	std::vector<uint8_t> result;
-	result.reserve(normalized.size() / 2);
-	for (size_t i = 0; i < normalized.size(); i += 2) {
-		const auto byteString = normalized.substr(i, 2);
-		result.push_back(static_cast<uint8_t>(std::stoul(byteString, nullptr, 16)));
-	}
-	return result;
-}
+using common::parseHexBytes;
 
 bool isRetryablePostStartTxFailure(const common::UDSRequestTxError& ex)
 {
@@ -1125,8 +1084,10 @@ void UDSRaw(common::CarPlatform carPlatform, uint8_t ecuId, j2534::J2534& j2534,
 		throw std::runtime_error("uds-raw requires at least one --data");
 	}
 
+	bool skipFallAsleep = false;
 	if (!sblPath.empty() && programMode == ProgramMode::Vehicle) {
 		UDSProgramMode(carPlatform, ecuId, j2534, 0);
+		skipFallAsleep = true;
 	}
 	else if (!sblPath.empty()) {
 		LOG(INFO) << "Bench program mode selected, skipping CEM programming mode";
@@ -1144,7 +1105,10 @@ void UDSRaw(common::CarPlatform carPlatform, uint8_t ecuId, j2534::J2534& j2534,
 		LOG(INFO) << "UDS raw SBL session start sblPath=" << sblPath
 			<< " programMode=" << programModeToString(programMode)
 			<< " noWakeup=" << noWakeup;
-		if (!common::UDSProtocolCommonSteps::fallAsleep(channels)) {
+		if (skipFallAsleep) {
+			LOG(INFO) << "Fall asleep skipped, vehicle programming mode was prepared by CEM";
+		}
+		else if (!common::UDSProtocolCommonSteps::fallAsleep(channels)) {
 			throw std::runtime_error("SBL fall asleep failed");
 		}
 		common::UDSProtocolCommonSteps::keepAlive(channel);
@@ -1274,7 +1238,7 @@ void UDSFunctionalEmergencyReset(common::CarPlatform carPlatform, uint8_t ecuId,
 	std::vector<std::vector<unsigned long>> msgIds;
 	const bool started = startPeriodicOnAllChannels(channels, common::UDSMessage(0x7DF, { 0x11, 0x81 }),
 		msgIds, "Functional emergency reset", 20);
-	waitForStopOrTimeout(std::chrono::milliseconds(200));
+	common::waitForStopOrTimeout(std::chrono::milliseconds(200));
 	stopPeriodicOnAllChannels(channels, msgIds);
 	if (!started) {
 		throw std::runtime_error("Functional emergency reset failed to start periodic messages");
@@ -1354,7 +1318,7 @@ void UDSProgramMode(common::CarPlatform carPlatform, uint8_t /*ecuId*/, j2534::J
 		if (!started) {
 			throw std::runtime_error("Program mode failed to start periodic messages");
 		}
-		waitForStopOrTimeout(std::chrono::milliseconds(180));
+		common::waitForStopOrTimeout(std::chrono::milliseconds(180));
 		stopPeriodicOnAllChannels(channels, msgIds);
 	}
 
@@ -1380,7 +1344,7 @@ void UDSProgramMode(common::CarPlatform carPlatform, uint8_t /*ecuId*/, j2534::J
 			throw std::runtime_error("TesterPresent hold failed to start periodic messages");
 		}
 		std::cout << "Holding TesterPresent for " << holdSeconds << " seconds" << std::endl;
-		waitForStopOrTimeout(std::chrono::seconds(holdSeconds));
+		common::waitForStopOrTimeout(std::chrono::seconds(holdSeconds));
 		stopPeriodicOnAllChannels(channels, msgIds);
 	}
 }
@@ -1412,7 +1376,7 @@ void D2Flash(const std::string& flashPath, std::unique_ptr<j2534::J2534> j2534, 
     while (flasher.getCurrentState() !=
                flasher::FlasherState::Done && flasher.getCurrentState() !=
                   flasher::FlasherState::Error) {
-		if (waitForStopOrTimeout(std::chrono::seconds(1))) {
+		if (common::waitForStopOrTimeout(std::chrono::seconds(1))) {
 			break;
 		}
         std::cout << ".";
@@ -1614,7 +1578,7 @@ void readFlash(std::unique_ptr<j2534::J2534> j2534, common::CarPlatform carPlatf
     while (flasher.getCurrentState() !=
                flasher::FlasherState::Done && flasher.getCurrentState() !=
                   flasher::FlasherState::Error) {
-		if (waitForStopOrTimeout(std::chrono::seconds(1))) {
+		if (common::waitForStopOrTimeout(std::chrono::seconds(1))) {
 			break;
 		}
         std::cout << ".";
@@ -1695,14 +1659,6 @@ void findMultiplePins()
 	}
 }
 
-BOOL WINAPI HandlerRoutine(_In_ DWORD dwCtrlType) {
-	if (dwCtrlType == CTRL_C_EVENT || dwCtrlType == CTRL_BREAK_EVENT || dwCtrlType == CTRL_CLOSE_EVENT) {
-		const bool alreadyRequested = stopRequested.exchange(true);
-		return alreadyRequested ? FALSE : TRUE;
-	}
-	return FALSE;
-}
-
 std::string getSehModuleName(void* address)
 {
 	MEMORY_BASIC_INFORMATION info{};
@@ -1732,12 +1688,10 @@ LONG WINAPI SehLoggingFilter(EXCEPTION_POINTERS* ep) {
 }
 
 int main(int argc, const char* argv[]) {
-    common::initLogger("VolvoFlasher.log", isDebugLoggingRequested(argc, argv));
+    common::initLogger("VolvoFlasher.log", common::isDebugLoggingRequested(argc, argv));
     common::printRuntimeDiagnostics("VolvoFlasher");
     SetUnhandledExceptionFilter(SehLoggingFilter);
-    if (!SetConsoleCtrlHandler(HandlerRoutine, TRUE)) {
-		throw std::runtime_error("Can't set console control hander");
-	}
+    common::installConsoleCtrlHandler();
 #if 0
 	fill_crc_map();
 //	findMultiplePins();
@@ -1784,94 +1738,87 @@ int main(int argc, const char* argv[]) {
 	if (getRunOptions(argc, argv, deviceName, baudrate, flashPath, pin, ecuId, start, datasize,
 		runMode, sblPath, carPlatform, scanPinsUpward, resetFunctional, programHoldSeconds, flashProgramMode,
 		readFormat, rawData, noWakeup, attachRunningSbl)) {
-        bool matchedDevice = false;
-		for (const auto& device : devices) {
-			if (deviceName.empty() ||
-				device.deviceName.find(deviceName) != std::string::npos) {
-                matchedDevice = true;
-				try {
-					std::string name =
-						device.deviceName.find("DiCE-") != std::string::npos
-						? device.deviceName
-						: "";
-					std::unique_ptr<j2534::J2534> j2534{
-						std::make_unique<j2534::J2534>(device.libraryName) };
-					j2534->PassThruOpen(name);
-					LOG(INFO) << "Selected device=" << device.deviceName
-						<< " library=" << device.libraryName
-						<< " mode=" << static_cast<int>(runMode)
-						<< " platform=" << static_cast<int>(carPlatform)
-						<< " ecu=0x" << std::hex << static_cast<int>(ecuId)
-						<< " baudrate=" << std::dec << baudrate
-						<< " input=" << flashPath;
-					if (runMode == RunMode::Wakeup) {
-						UDSWakeup(carPlatform, ecuId, *j2534);
-					}
-					else if (runMode == RunMode::Pin) {
-						findPin2(*j2534, carPlatform, ecuId, pin, scanPinsUpward);
-					}
-					else if (runMode == RunMode::Read) {
-						readFlash(std::move(j2534), carPlatform, ecuId, flashPath, start, datasize,
-							pin, sblPath, flashProgramMode, readFormat, attachRunningSbl);
-					}
-					else if (runMode == RunMode::Flash) {
-						const auto ecuInfo{ common::getEcuInfoByEcuId(carPlatform, ecuId) };
-						if (std::get<0>(ecuInfo).protocolId == ISO15765) {
-							UDSFlash(carPlatform, ecuId, std::move(j2534), baudrate, pin, flashPath, sblPath, flashProgramMode,
-								attachRunningSbl);
-						}
-						else {
-							D2Flash(flashPath, std::move(j2534), baudrate);
-						}
-					}
-					else if (runMode == RunMode::Test) {
-						doSomeStuff(std::move(j2534), pin);
-					}
-					else if (runMode == RunMode::Diag) {
-						UDSDiag(carPlatform, ecuId, *j2534);
-					}
-					else if (runMode == RunMode::Reset) {
-						UDSReset(carPlatform, ecuId, *j2534, resetFunctional);
-					}
-					else if (runMode == RunMode::Program) {
-						UDSProgramMode(carPlatform, ecuId, *j2534, programHoldSeconds);
-					}
-					else if (runMode == RunMode::UdsRaw) {
-						UDSRaw(carPlatform, ecuId, *j2534, pin, rawData, sblPath, flashProgramMode, noWakeup);
-					}
+		j2534::DeviceInfo device;
+		try {
+			device = common::selectSingleDevice(devices, deviceName);
+		}
+		catch (const std::exception& ex) {
+			LOG(WARNING) << ex.what();
+			std::cout << ex.what() << std::endl;
+			if (devices.empty()) {
+				common::printJ2534ArchitectureHint(std::cout);
+			}
+			return 1;
+		}
+		try {
+			std::string name =
+				device.deviceName.find("DiCE-") != std::string::npos
+				? device.deviceName
+				: "";
+			std::unique_ptr<j2534::J2534> j2534{
+				std::make_unique<j2534::J2534>(device.libraryName) };
+			j2534->PassThruOpen(name);
+			LOG(INFO) << "Selected device=" << device.deviceName
+				<< " library=" << device.libraryName
+				<< " mode=" << static_cast<int>(runMode)
+				<< " platform=" << static_cast<int>(carPlatform)
+				<< " ecu=0x" << std::hex << static_cast<int>(ecuId)
+				<< " baudrate=" << std::dec << baudrate
+				<< " input=" << flashPath;
+			if (runMode == RunMode::Wakeup) {
+				UDSWakeup(carPlatform, ecuId, *j2534);
+			}
+			else if (runMode == RunMode::Pin) {
+				findPin2(*j2534, carPlatform, ecuId, pin, scanPinsUpward);
+			}
+			else if (runMode == RunMode::Read) {
+				readFlash(std::move(j2534), carPlatform, ecuId, flashPath, start, datasize,
+					pin, sblPath, flashProgramMode, readFormat, attachRunningSbl);
+			}
+			else if (runMode == RunMode::Flash) {
+				const auto ecuInfo{ common::getEcuInfoByEcuId(carPlatform, ecuId) };
+				if (std::get<0>(ecuInfo).protocolId == ISO15765) {
+					UDSFlash(carPlatform, ecuId, std::move(j2534), baudrate, pin, flashPath, sblPath, flashProgramMode,
+						attachRunningSbl);
 				}
-				catch (const std::exception& ex) {
-					LOG(ERROR) << "Command failed: " << ex.what();
-					std::cout << ex.what() << std::endl;
-				}
-				catch (const char* ex) {
-					LOG(ERROR) << "Command failed: " << ex;
-					std::cout << ex << std::endl;
-				}
-				catch (...) {
-					LOG(ERROR) << "Command failed with unknown exception";
-					std::cout << "exception" << std::endl;
+				else {
+					D2Flash(flashPath, std::move(j2534), baudrate);
 				}
 			}
+			else if (runMode == RunMode::Test) {
+				doSomeStuff(std::move(j2534), pin);
+			}
+			else if (runMode == RunMode::Diag) {
+				UDSDiag(carPlatform, ecuId, *j2534);
+			}
+			else if (runMode == RunMode::Reset) {
+				UDSReset(carPlatform, ecuId, *j2534, resetFunctional);
+			}
+			else if (runMode == RunMode::Program) {
+				UDSProgramMode(carPlatform, ecuId, *j2534, programHoldSeconds);
+			}
+			else if (runMode == RunMode::UdsRaw) {
+				UDSRaw(carPlatform, ecuId, *j2534, pin, rawData, sblPath, flashProgramMode, noWakeup);
+			}
 		}
-        if (!matchedDevice) {
-            const auto message = deviceName.empty()
-                ? "No J2534 devices found."
-                : "No J2534 devices matched --device \"" + deviceName + "\".";
-            LOG(WARNING) << message;
-            std::cout << message << std::endl;
-            common::printJ2534ArchitectureHint(std::cout);
-        }
+		catch (const std::exception& ex) {
+			LOG(ERROR) << "Command failed: " << ex.what();
+			std::cout << ex.what() << std::endl;
+			return 1;
+		}
+		catch (const char* ex) {
+			LOG(ERROR) << "Command failed: " << ex;
+			std::cout << ex << std::endl;
+			return 1;
+		}
+		catch (...) {
+			LOG(ERROR) << "Command failed with unknown exception";
+			std::cout << "exception" << std::endl;
+			return 1;
+		}
 	}
 	else {
-		std::cout << "Available J2534 devices (" << common::getProcessArchitecture()
-			<< " only):" << std::endl;
-		for (const auto& device : devices) {
-			std::cout << "    " << device.deviceName << std::endl;
-		}
-        if (devices.empty()) {
-            common::printJ2534ArchitectureHint(std::cout);
-        }
+		common::printAvailableDevices(std::cout, devices);
 	}
 	return 0;
 }
