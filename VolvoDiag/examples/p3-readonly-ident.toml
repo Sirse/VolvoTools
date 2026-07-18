@@ -1,0 +1,20 @@
+version = 1
+name = "p3-readonly-ident"
+platform = "P3"
+ecu = "10"
+timeout_ms = 1000
+
+[prelude]
+session = "extended"
+
+[[steps]]
+name = "read-vin"
+uds = "22 F1 90"
+
+[steps.expect]
+positive = true
+prefix = "62 F1 90"
+
+[[steps]]
+name = "read-identifiers"
+did_read = ["D100", "F180", "F18C", "F191", "F1AF", "F1B0"]
