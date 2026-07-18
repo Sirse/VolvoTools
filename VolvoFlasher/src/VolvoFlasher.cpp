@@ -234,7 +234,7 @@ bool getRunOptions(int argc, const char* argv[], std::string& deviceName,
 
 	argparse::ArgumentParser uds_raw_command("uds-raw", "1.0", argparse::default_arguments::help);
     addDebugArgument(uds_raw_command);
-	uds_raw_command.add_description("Send raw UDS request(s) to ECU and print response. Optional --sbl keeps the same RAM SBL session for probes.");
+	uds_raw_command.add_description("Send raw UDS request(s) to ECU and print response (spelled uds-raw, with a hyphen). Optional --sbl keeps the same RAM SBL session for probes.");
 	uds_raw_command.add_argument("--data").required().append().help("Hex bytes, repeatable, e.g. \"10 03\" or \"31 01 03 01 00 7F 80 80\"");
 	uds_raw_command.add_argument("--sbl").default_value(std::string()).help("Optional SBL VBF to load/start before raw request(s)");
 	uds_raw_command.add_argument("--program-mode").default_value(std::string{ "bench" })
