@@ -27,14 +27,23 @@ public:
     explicit UDSRequestRxTimeout(const std::string& message);
 };
 
+// Total extra time an ECU may buy itself by answering 7F <sid> 78 (RequestReceivedResponsePending).
+// This is the P4CANMax of the vehicle configuration and is deliberately separate from the
+// per-read timeout: erase and transfer legitimately keep an ECU busy for minutes, while the plain
+// timeout is sized for a normal round trip. The budget only keeps ticking while the ECU actually
+// emits pending responses, so a silent ECU still fails after one ordinary timeout.
+constexpr size_t kResponsePendingTimeout = 300000;
+
 class UDSRequest {
 public:
     UDSRequest(uint32_t canId, const std::vector<uint8_t>& data);
     UDSRequest(uint32_t canId, std::vector<uint8_t>&& data);
 
-    std::vector<uint8_t> process(const j2534::J2534Channel& channel, size_t timeout = 1000);
+    std::vector<uint8_t> process(const j2534::J2534Channel& channel, size_t timeout = 1000,
+                                 size_t pendingTimeout = kResponsePendingTimeout);
     std::vector<uint8_t> process(const j2534::J2534Channel& channel, const std::vector<uint8_t>& checkData,
-                                 size_t retryCount = 1, size_t timeout = 1000);
+                                 size_t retryCount = 1, size_t timeout = 1000,
+                                 size_t pendingTimeout = kResponsePendingTimeout);
 
 private:
     uint32_t _canId;
