@@ -159,3 +159,20 @@ TEST(BusConfig, SamplePointComesFromConfiguration)
     const auto p2 = getConfigurationInfoByCarPlatform(CarPlatform::P2);
     EXPECT_EQ(busByName(p2, "CAN MS").samplePoint, 68u);
 }
+
+// Volvo's own identifiers, taken from the factory tooling's published interface. They used to
+// fall through to the "DID 0x...." placeholder.
+TEST(Did, KnowsVolvoSpecificIdentifiers)
+{
+    EXPECT_EQ(didName(0xF162), "Software download specification version");
+    EXPECT_EQ(didName(0xF1B0), "ECU hardware number (KDP)");
+    EXPECT_EQ(didName(0xD100), "Diagnostic session type");
+
+    // Assembly numbers come back either as text or as packed digits. Text renders as text;
+    // packed digits aren't printable and fall back to hex instead of turning into garbage.
+    EXPECT_EQ(decodeDidValue(0xF111, {'3', '1', '8', '0', '8', '4', '5', '6'}), "31808456");
+    EXPECT_EQ(decodeDidValue(0xF111, {0x31, 0x80, 0x84, 0x56}), "31 80 84 56");
+
+    // Binary identifiers must never be guessed as text.
+    EXPECT_EQ(decodeDidValue(0xF102, {0x41, 0x42}), "41 42");
+}

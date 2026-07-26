@@ -34,11 +34,34 @@ const KnownDid kKnownDids[] = {
     {0xF19D, "ECU installation date", DidFormat::Hex},
 };
 
+// Volvo-specific identifiers used by the factory software download tooling. The assembly and
+// part numbers are marked Ascii because ECUs are inconsistent about them: some answer with text,
+// some with packed digits, and Ascii already falls back to hex when the bytes aren't printable.
+// The genuinely binary ones stay Hex so a stray printable byte can't render as garbage text.
+const KnownDid kVolvoDids[] = {
+    {0xD100, "Diagnostic session type", DidFormat::Hex},
+    {0xF101, "PBL configuration", DidFormat::Hex},
+    {0xF102, "Security constant", DidFormat::Hex},
+    {0xF109, "Boot software version number", DidFormat::Ascii},
+    {0xF111, "ECU core assembly number", DidFormat::Ascii},
+    {0xF113, "ECU delivery assembly number", DidFormat::Ascii},
+    {0xF162, "Software download specification version", DidFormat::Ascii},
+    {0xF1A3, "KDP core assembly number", DidFormat::Ascii},
+    {0xF1A4, "KDP delivery assembly number", DidFormat::Ascii},
+    {0xF1AF, "Boot software id (KDP)", DidFormat::Ascii},
+    {0xF1B0, "ECU hardware number (KDP)", DidFormat::Ascii},
+};
+
 } // namespace
 
 const KnownDid* findKnownDid(uint16_t did)
 {
     for (const auto& known : kKnownDids) {
+        if (known.id == did) {
+            return &known;
+        }
+    }
+    for (const auto& known : kVolvoDids) {
         if (known.id == did) {
             return &known;
         }
