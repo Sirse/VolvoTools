@@ -1,6 +1,8 @@
 #include "common/VBFParser.hpp"
 #include "common/Util.hpp"
 
+#include <easylogging++.h>
+
 #include <boost/spirit/home/x3.hpp>
 #include <boost/fusion/include/adapt_struct.hpp>
 #include <boost/spirit/home/x3/support/utility/annotate_on_success.hpp>
@@ -129,6 +131,9 @@ namespace common {
 		// The first element is the one that identifies the part/target, so that's what we keep.
 		x3::rule<class uint_list, std::vector<uint32_t>> const uint_list = "uint_list";
 		x3::rule<class string_list, std::vector<std::string>> const string_list = "string_list";
+		// Catch-all for header entries we don't model. Volvo keeps adding keys, and the header
+		// used to be a closed alternation, so a single unknown key killed the whole file.
+		x3::rule<class unknown_entry, std::string> const unknown_entry = "unknown_entry";
 
 		auto const quoted_string = x3::lexeme['"' >> *(x3::char_ - '"' - x3::eol) >> '"'];
 		auto const unquoted_string = x3::lexeme[+(x3::char_ - ';' - x3::eol)];
@@ -158,6 +163,11 @@ namespace common {
 
 		auto const uint_list_def = '{' >> -(uint_literal % ',') >> '}';
 		auto const string_list_def = '{' >> -(quoted_string % ',') >> '}';
+
+		// "<name> = <anything up to ;> ;". Requiring the name and the '=' keeps this from
+		// matching the closing brace or an empty string, so the enclosing *(...) always advances.
+		auto const unknown_entry_def = x3::lexeme[+x3::char_("a-zA-Z0-9_")]
+			>> '=' >> x3::omit[x3::lexeme[*(x3::char_ - ';')]] >> ';';
 
 		auto const on_checksum_list = [](auto& ctx) {
 			auto blocks = x3::_attr(ctx);
@@ -257,12 +267,17 @@ namespace common {
 				| (x3::lit("checksum_table") >> '=' >> checksum_block_list[on_checksum_list] >> ';')
 				| (x3::lit("file_checksum") >> '=' >> uint_literal[([](auto& ctx) {
 					x3::_val(ctx).fileChecksum = x3::_attr(ctx);
-					})] >> ';')) >> '}';
+					})] >> ';')
+				// Must stay last: it matches any "name = value;" and would shadow everything
+				// above. A known key with a malformed value also lands here, hence the warning.
+				| unknown_entry[([](auto& ctx) {
+					LOG(WARNING) << "VBF header entry ignored: " << x3::_attr(ctx);
+					})]) >> '}';
 
 		BOOST_SPIRIT_DEFINE(description, vbf_header, uint_literal, uint8_literal,
 							full_erase_block, erase_block_list,
 							checksum_block, checksum_block_list,
-							uint_list, string_list);
+							uint_list, string_list, unknown_entry);
 
 		template<typename T>
 		T parseVBFHeader(T begin, T end, VBFHeader& data)

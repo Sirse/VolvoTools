@@ -237,3 +237,30 @@ TEST(VbfHeader, AcceptsBraceListForms)
     EXPECT_EQ(scalar.swPartNumber, "31808832");
     EXPECT_EQ(scalar.ecuAddress, 0x7Au);
 }
+
+// The header used to be a closed alternation, so one unknown key killed the whole file.
+TEST(VbfHeader, SkipsUnknownEntriesInsteadOfFailing)
+{
+    const auto header = parseHeader(vbfHeader(
+        " some_future_volvo_key = 0x42;\n"
+        " another_one = { 1, 2, 3 };\n"
+        " call = 0x8000;\n"));
+    // Unknown entries are skipped, and the known ones around them still land.
+    EXPECT_EQ(header.call, 0x8000u);
+    EXPECT_EQ(header.swPartNumber, "31808832");
+    EXPECT_EQ(header.ecuAddress, 0x7Au);
+}
+
+// The catch-all must not shadow keys we do model.
+TEST(VbfHeader, KnownEntriesStillWinOverCatchAll)
+{
+    const auto header = parseHeader(vbfHeader(
+        " sw_version = AB;\n session_type = programming;\n"
+        " security_access_level = 0x11;\n erase = {{0x8000, 0x1000}};\n"));
+    EXPECT_EQ(header.swVersion, "AB");
+    EXPECT_EQ(header.sessionType, SessionType::PROGRAMMING);
+    EXPECT_EQ(header.securityAccessLevel, 0x11);
+    ASSERT_EQ(header.eraseBlocks.size(), 1u);
+    EXPECT_EQ(header.eraseBlocks[0].startAddr, 0x8000u);
+    EXPECT_EQ(header.eraseBlocks[0].length, 0x1000u);
+}
