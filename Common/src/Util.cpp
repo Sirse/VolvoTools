@@ -555,15 +555,26 @@ namespace {
         channel.passThruIoctl(CAN_XON_XOFF_FILTER_ACTIVE, &msgId);
     }
 
-    static void setupChannelParameters(j2534::J2534Channel& channel)
+    // Fallback used when the bus configuration carries no explicit sample point.
+    // Matches the shipped vehicle configuration everywhere except P1 CAN MS (which wants 60),
+    // so prefer the configured value whenever the caller has one.
+    static unsigned long defaultSamplePoint(unsigned long baudrate)
     {
+        return baudrate == 500000 ? 80 : 68;
+    }
+
+    static void setupChannelParameters(j2534::J2534Channel& channel, unsigned long samplePoint = 0)
+    {
+        const auto effectiveSamplePoint = samplePoint != 0
+            ? samplePoint
+            : defaultSamplePoint(channel.getBaudrate());
         std::vector<SCONFIG> config(3);
         config[0].Parameter = DATA_RATE;
         config[0].Value = channel.getBaudrate();
         config[1].Parameter = LOOPBACK;
         config[1].Value = 0;
         config[2].Parameter = BIT_SAMPLE_POINT;
-        config[2].Value = (channel.getBaudrate() == 500000 ? 80 : 68);
+        config[2].Value = effectiveSamplePoint;
         channel.setConfig(config);
     }
 
@@ -579,11 +590,11 @@ namespace {
 
     std::unique_ptr<j2534::J2534Channel>
         openChannel(j2534::J2534& j2534, unsigned long ProtocolID, unsigned long Flags,
-            unsigned long Baudrate, bool AdditionalConfiguration) {
+            unsigned long Baudrate, bool AdditionalConfiguration, unsigned long SamplePoint) {
         auto channel{ std::make_unique<j2534::J2534Channel>(j2534, ProtocolID, Flags,
                                                            Baudrate, Flags) };
 
-        setupChannelParameters(*channel);
+        setupChannelParameters(*channel, SamplePoint);
 
         unsigned long msgId;
         PASSTHRU_MSG msgFilter =
@@ -601,7 +612,8 @@ namespace {
     }
 
     std::unique_ptr<j2534::J2534Channel>
-        openUDSChannel(j2534::J2534& j2534, unsigned long baudrate, uint32_t canId) {
+        openUDSChannel(j2534::J2534& j2534, unsigned long baudrate, uint32_t canId,
+            unsigned long samplePoint) {
 
         std::unique_ptr<j2534::J2534Channel> channel;
         const std::vector<unsigned long> SupportedProtocols = { ISO15765_PS, ISO15765 };
@@ -621,7 +633,7 @@ namespace {
                 continue;
             }
 
-            setupChannelParameters(*channel);
+            setupChannelParameters(*channel, samplePoint);
             setupChannelPins(*channel);
 
             if (canId) {
@@ -688,7 +700,7 @@ namespace {
     }
 
     std::unique_ptr<j2534::J2534Channel> openLowSpeedChannel(j2534::J2534& j2534,
-        unsigned long Flags) {
+        unsigned long Flags, unsigned long SamplePoint) {
 
         const auto Baudrate = 125000;
         const std::vector<unsigned long> SupportedProtocols = { CAN_XON_XOFF, CAN_PS };
@@ -712,7 +724,7 @@ namespace {
                 config[0].Value = 0x030B;
                 channel->setConfig(config);
             }
-            setupChannelParameters(*channel);
+            setupChannelParameters(*channel, SamplePoint);
 
             PASSTHRU_MSG msgFilter =
                 makePassThruMsg(ProtocolID, Flags, { 0x00, 0x00, 0x00, 0x01 });
@@ -766,6 +778,8 @@ namespace {
         const BusConfiguration& bus, std::optional<uint32_t> baudrateOverride)
     {
         const auto baudrate = baudrateOverride.value_or(bus.baudrate);
+        // The configured sample point only applies at the configured baudrate.
+        const unsigned long samplePoint = baudrate == bus.baudrate ? bus.samplePoint : 0;
         const unsigned long flags = bus.canIdBitSize == 29 ? CAN_29BIT_ID : 0;
 
         std::vector<unsigned long> protocolIds{ CAN };
@@ -780,7 +794,7 @@ namespace {
             }
             try {
                 auto channel = std::make_unique<j2534::J2534Channel>(j2534, protocolId, localFlags, baudrate, flags);
-                setupChannelParameters(*channel);
+                setupChannelParameters(*channel, samplePoint);
                 if (protocolId == CAN_PS) {
                     std::vector<SCONFIG> pinsConfig(1);
                     pinsConfig[0].Parameter = J1962_PINS;
@@ -1133,6 +1147,7 @@ namespace {
                 BusConfiguration busConf;
                 busConf.baudrate = bus["BaudRate"].as<uint32_t>() * 1000;
                 busConf.canIdBitSize = bus["CANIdBitSize"].as<uint32_t>();
+                busConf.samplePoint = bus["SamplePoint"].as<uint32_t>(0);
                 busConf.protocolId = getCanProtocol(bus["SWDLProtocol"].as<std::string>());
                 busConf.name = bus["Name"].as<std::string>();
                 const auto& nodes = bus["Node"];

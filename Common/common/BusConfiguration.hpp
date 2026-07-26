@@ -12,6 +12,10 @@ struct BusConfiguration {
     uint32_t protocolId;
     uint32_t baudrate;
     uint32_t canIdBitSize;
+    // CAN bit sample point in percent, as shipped in the vehicle configuration.
+    // 0 means "not specified" and callers fall back to deriving it from the baudrate.
+    // Most buses are 68/80, but P1 CAN MS wants 60, which the baudrate alone can't tell you.
+    uint32_t samplePoint = 0;
     std::vector<ECUInfo> ecuInfo;
 };
 

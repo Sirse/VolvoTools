@@ -134,8 +134,10 @@ std::unique_ptr<j2534::J2534Channel> openObdChannel(j2534::J2534& j2534, const R
     constexpr uint8_t kPowertrainEcuId = 0x10;
     constexpr uint32_t kObdEcmRequestCanId = 0x7E0;
     const auto bus = std::get<0>(common::getEcuInfoByEcuId(options.carPlatform, kPowertrainEcuId));
-    return common::openUDSChannel(j2534, options.baudrateOverride.value_or(bus.baudrate),
-                                  kObdEcmRequestCanId);
+    const auto baudrate = options.baudrateOverride.value_or(bus.baudrate);
+    // The configured sample point only applies at the configured baudrate.
+    const unsigned long samplePoint = baudrate == bus.baudrate ? bus.samplePoint : 0;
+    return common::openUDSChannel(j2534, baudrate, kObdEcmRequestCanId, samplePoint);
 }
 
 std::vector<uint8_t> processUds(const j2534::J2534Channel& channel, uint32_t canId,

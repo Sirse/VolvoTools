@@ -130,3 +130,32 @@ TEST(Did, NameAndAsciiValue)
     EXPECT_EQ(didName(0xF190), "VIN");
     EXPECT_EQ(decodeDidValue(0xF190, {'A', 'B', 'C'}), "ABC");
 }
+
+// ---- bus configuration ----------------------------------------------------
+
+namespace {
+
+const BusConfiguration& busByName(const ConfigurationInfo& conf, const std::string& name)
+{
+    for (const auto& bus : conf.busInfo) {
+        if (bus.name == name) {
+            return bus;
+        }
+    }
+    throw std::runtime_error("No such bus: " + name);
+}
+
+} // namespace
+
+// The sample point used to be derived from the baudrate alone (500k -> 80, else 68), which is
+// wrong for P1 CAN MS: the shipped vehicle configuration asks for 60 there. Make sure the value
+// now comes from the configuration.
+TEST(BusConfig, SamplePointComesFromConfiguration)
+{
+    const auto p1 = getConfigurationInfoByCarPlatform(CarPlatform::P1);
+    EXPECT_EQ(busByName(p1, "CAN MS").samplePoint, 60u);
+    EXPECT_EQ(busByName(p1, "CAN HS").samplePoint, 80u);
+
+    const auto p2 = getConfigurationInfoByCarPlatform(CarPlatform::P2);
+    EXPECT_EQ(busByName(p2, "CAN MS").samplePoint, 68u);
+}

@@ -19,20 +19,23 @@ std::unique_ptr<j2534::J2534Channel> createChannelByBusConf(j2534::J2534& j2534,
                                                             uint32_t canId = 0,
                                                             std::optional<uint32_t> baudrateOverride = std::nullopt)
 {
-    if (baudrateOverride.has_value()) {
+    if (baudrateOverride.has_value() && bus.baudrate != *baudrateOverride) {
         bus.baudrate = *baudrateOverride;
+        // The configured sample point belongs to the configured baudrate, so drop it
+        // and let the channel fall back to the baudrate-derived default.
+        bus.samplePoint = 0;
     }
     if(bus.protocolId == CAN) {
         const unsigned long flags = (bus.canIdBitSize == 29)? CAN_29BIT_ID : 0;
         if(bus.baudrate != 125000) {
-            return openChannel(j2534, bus.protocolId, flags, bus.baudrate);
+            return openChannel(j2534, bus.protocolId, flags, bus.baudrate, false, bus.samplePoint);
         }
         else {
-            return openLowSpeedChannel(j2534, flags);
+            return openLowSpeedChannel(j2534, flags, bus.samplePoint);
         }
     }
     else if(bus.protocolId == ISO15765) {
-        return openUDSChannel(j2534, bus.baudrate, canId);
+        return openUDSChannel(j2534, bus.baudrate, canId, bus.samplePoint);
     }
     else if(bus.protocolId == ISO14230) {
         return openTP20Channel(j2534, bus.baudrate, canId);
