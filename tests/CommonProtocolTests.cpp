@@ -1,10 +1,12 @@
 #include <common/Util.hpp>
+#include <common/VBFParser.hpp>
 #include <common/protocols/UDSDid.hpp>
 #include <common/protocols/UDSDtc.hpp>
 
 #include <gtest/gtest.h>
 
 #include <stdexcept>
+#include <string>
 #include <vector>
 
 using namespace common;
@@ -175,4 +177,44 @@ TEST(Did, KnowsVolvoSpecificIdentifiers)
 
     // Binary identifiers must never be guessed as text.
     EXPECT_EQ(decodeDidValue(0xF102, {0x41, 0x42}), "41 42");
+}
+
+// ---- VBF header -----------------------------------------------------------
+
+namespace {
+
+// A minimal but complete VBF header; the body is irrelevant for header-level checks.
+std::string vbfHeader(const std::string& extraEntries)
+{
+    return "vbf_version = 2.6;\nheader {\n"
+           " sw_part_number = \"31808832\";\n"
+           " sw_part_type = EXE;\n"
+           " network = CAN_HS;\n"
+           " ecu_address = 0x7A;\n"
+           + extraEntries +
+           " file_checksum = 0x1234;\n}\n";
+}
+
+VBFHeader parseHeader(const std::string& text)
+{
+    VBFParser parser;
+    return parser.parse(std::vector<char>(text.begin(), text.end())).header;
+}
+
+} // namespace
+
+// data_format_identifier used to be an unknown key, which killed the whole parse.
+TEST(VbfHeader, ParsesDataFormatIdentifier)
+{
+    EXPECT_EQ(parseHeader(vbfHeader(" data_format_identifier = 0x00;\n")).dataFormatIdentifier, 0x00);
+    EXPECT_EQ(parseHeader(vbfHeader(" data_format_identifier = 0x10;\n")).dataFormatIdentifier, 0x10);
+}
+
+// Anything but 0x00 means packed payload, which we must never write to an ECU.
+TEST(VbfHeader, FlagsPackedDataFormat)
+{
+    EXPECT_FALSE(isPackedDataFormat(parseHeader(vbfHeader(" data_format_identifier = 0x00;\n"))));
+    EXPECT_TRUE(isPackedDataFormat(parseHeader(vbfHeader(" data_format_identifier = 0x10;\n"))));
+    // Absent means plain data, which is the historical assumption.
+    EXPECT_FALSE(isPackedDataFormat(parseHeader(vbfHeader(""))));
 }

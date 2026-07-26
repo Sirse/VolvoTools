@@ -6,6 +6,7 @@
 
 #include <intelhex.h>
 
+#include <sstream>
 #include <stdexcept>
 
 namespace common {
@@ -133,7 +134,17 @@ common::VBF loadVBFForFlasher(CarPlatform carPlatform, uint8_t ecuId,
 {
     if(path.rfind(".vbf") != std::string::npos) {
         common::VBFParser parser;
-        return parser.parse(input);
+        auto vbf = parser.parse(input);
+        // Fail here rather than halfway through a flash: the user picked this file, so tell
+        // them why it can't be used before anything touches the ECU.
+        if(isPackedDataFormat(vbf.header)) {
+            std::ostringstream message;
+            message << "VBF uses data_format_identifier=0x" << std::hex
+                    << static_cast<int>(vbf.header.dataFormatIdentifier)
+                    << " (packed payload); unpacking is not implemented, refusing to flash it";
+            throw std::runtime_error(message.str());
+        }
+        return vbf;
     }
     if(path.rfind(".hex") != std::string::npos) {
         intelhex::hex_data hexData;

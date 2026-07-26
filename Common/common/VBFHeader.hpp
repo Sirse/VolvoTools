@@ -68,6 +68,10 @@ namespace common {
 		uint32_t ecuAddress{};
 		FrameFormat frameFormat{ FrameFormat::UNKNOWN };
 		uint32_t call{};
+		// Volvo's data_format_identifier: 0x00 is plain data, anything else means the chunk
+		// payload is packed (0x10 is the compressed variant). We can't unpack it, so this
+		// mostly exists so we can refuse the file instead of flashing garbage into an ECU.
+		uint8_t dataFormatIdentifier{};
 		uint32_t fileChecksum{};
 		std::vector<EraseBlock> eraseBlocks;
 		std::vector<ChecksumBlock> checksumTable;
@@ -77,5 +81,12 @@ namespace common {
 		std::string signature;
 		std::string certificateIdentifier;
 	};
+
+	// True when the chunk payload is packed rather than plain data. We have no unpacker, so
+	// writing such a file to an ECU would brick it - callers must refuse instead.
+	inline bool isPackedDataFormat(const VBFHeader& header)
+	{
+		return header.dataFormatIdentifier != 0x00;
+	}
 
 } // namespace common

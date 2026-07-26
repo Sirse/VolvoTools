@@ -309,6 +309,14 @@ namespace common {
                                               const std::function<void(size_t)>& progressCallback)
     {
         LOG(INFO) << "transferData enter";
+        // Last line of defence: we have no unpacker, and writing packed payload as-is would
+        // brick the ECU. Refuse here so nothing can reach an ECU by any other path.
+        if (isPackedDataFormat(data.header)) {
+            LOG(ERROR) << "transferData refused: VBF has data_format_identifier=0x" << std::hex
+                       << static_cast<int>(data.header.dataFormatIdentifier)
+                       << ", payload is packed and unpacking is not implemented";
+            return false;
+        }
         try {
             for (const auto& chunk : data.chunks) {
                 if (!transferChunk(channel, canId, chunk, progressCallback)) {
