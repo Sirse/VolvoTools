@@ -32,6 +32,12 @@ namespace common {
         static bool eraseFlash(const j2534::J2534Channel& channel, uint32_t canId, const VBF& data);
         static bool eraseChunk(const j2534::J2534Channel& channel, uint32_t canId, const VBFChunk& chunk);
         static bool startRoutine(const j2534::J2534Channel& channel, uint32_t canId, uint32_t addr);
+        // Routine 31 01 FF 01: asks the ECU whether the software it now holds is self-consistent.
+        // Returns false only when the ECU ran the routine and reported a fault. An ECU that does
+        // not implement it answers with an NRC, which counts as success - this is an extra
+        // verification step and not every ECU supports it.
+        static bool checkProgrammingDependencies(const j2534::J2534Channel& channel, uint32_t canId,
+                                                 uint32_t startAddr, uint32_t length);
         static bool checkValidApplication(const j2534::J2534Channel& channel, uint32_t canId);
 	};
 

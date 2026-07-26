@@ -557,6 +557,34 @@ namespace common {
         return true;
     }
 
+    bool UDSProtocolCommonSteps::checkProgrammingDependencies(const j2534::J2534Channel& channel, uint32_t canId,
+                                                              uint32_t startAddr, uint32_t length)
+    {
+        LOG(INFO) << "checkProgrammingDependencies enter, addr=0x" << std::hex << startAddr
+                  << " length=0x" << length;
+        const auto addr = toVector(startAddr);
+        const auto size = toVector(length);
+        UDSRequest request{ canId, { 0x31, 0x01, 0xff, 0x01,
+                                     addr[0], addr[1], addr[2], addr[3],
+                                     size[0], size[1], size[2], size[3] } };
+        try {
+            (void)request.process(channel, { 0x01, 0xff, 0x01, 0x00 }, 1, 60000);
+        }
+        catch (const UDSError& ex) {
+            // The ECU rejected the request outright, so it just doesn't implement the routine.
+            // Don't fail an otherwise good flash over an optional check.
+            LOG(WARNING) << "checkProgrammingDependencies not supported by ECU (nrc=0x" << std::hex
+                         << static_cast<int>(ex.getErrorCode()) << "), skipping: " << ex.what();
+            return true;
+        }
+        catch (const std::exception& ex) {
+            LOG(ERROR) << "checkProgrammingDependencies reported a fault: " << ex.what();
+            return false;
+        }
+        LOG(INFO) << "checkProgrammingDependencies completed";
+        return true;
+    }
+
     bool UDSProtocolCommonSteps::checkValidApplication(const j2534::J2534Channel& channel, uint32_t canId)
     {
         LOG(INFO) << "checkValidApplication enter";

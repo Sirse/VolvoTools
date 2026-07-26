@@ -164,6 +164,18 @@ namespace flasher {
                     return;
                 }
             }
+            // Ask the ECU whether what we just wrote hangs together, before we tell it the
+            // application is valid. Per written region, mirroring the factory tool.
+            for (const auto& chunk : _flasherParameters.flash.chunks) {
+                if (chunk.data.empty()) {
+                    continue;
+                }
+                if (!common::UDSProtocolCommonSteps::checkProgrammingDependencies(
+                        channel, _canId, chunk.writeOffset, static_cast<uint32_t>(chunk.data.size()))) {
+                    setFailed("Programming dependencies check failed");
+                    return;
+                }
+            }
         }
 
         void checkValidApplication()
