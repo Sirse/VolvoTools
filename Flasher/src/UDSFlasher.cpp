@@ -135,6 +135,14 @@ namespace flasher {
         void writeFlash()
         {
             auto& channel{ common::getChannelByEcuId(_flasherParameters.carPlatform, _flasherParameters.ecuId, _channels) };
+            // This path writes chunks directly, so it bypasses the guard in transferData.
+            // Check here too: writing packed payload as plain data bricks the ECU.
+            if (common::isPackedDataFormat(_flasherParameters.flash.header)) {
+                setFailed("Flash file has packed payload (data_format_identifier=0x"
+                    + common::toHexString({ _flasherParameters.flash.header.dataFormatIdentifier })
+                    + "), unpacking is not implemented");
+                return;
+            }
             _stateUpdater(FlasherState::EraseFlash);
             if (!common::UDSProtocolCommonSteps::eraseFlash(channel, _canId, _flasherParameters.flash)) {
                 setFailed("Flash erasing failed");
