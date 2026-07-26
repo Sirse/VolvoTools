@@ -123,6 +123,12 @@ namespace common {
 		x3::rule<class erase_block_list, std::vector<EraseBlock>> const erase_block_list = "erase_block_list";
 		x3::rule<class checksum_block, ChecksumBlock> const checksum_block = "checksum_block";
 		x3::rule<class checksum_block_list, std::vector<ChecksumBlock>> const checksum_block_list = "checksum_block_list";
+		// Volvo writes some scalar entries as a brace list, e.g.
+		//   ecu_address = { 0x723, 0x00, 0xff };
+		//   sw_part_number = { "YW4T-13B525-AB", "31808832" };
+		// The first element is the one that identifies the part/target, so that's what we keep.
+		x3::rule<class uint_list, std::vector<uint32_t>> const uint_list = "uint_list";
+		x3::rule<class string_list, std::vector<std::string>> const string_list = "string_list";
 
 		auto const quoted_string = x3::lexeme['"' >> *(x3::char_ - '"' - x3::eol) >> '"'];
 		auto const unquoted_string = x3::lexeme[+(x3::char_ - ';' - x3::eol)];
@@ -150,6 +156,9 @@ namespace common {
 
 		auto const checksum_block_list_def = '{' >> -(checksum_block % ',') >> '}';
 
+		auto const uint_list_def = '{' >> -(uint_literal % ',') >> '}';
+		auto const string_list_def = '{' >> -(quoted_string % ',') >> '}';
+
 		auto const on_checksum_list = [](auto& ctx) {
 			auto blocks = x3::_attr(ctx);
 			auto& hdr = x3::_val(ctx);
@@ -165,6 +174,14 @@ namespace common {
 			x3::lit("header") >> '{' >> *(description[([](auto& ctx) {
 					x3::_val(ctx).description = x3::_attr(ctx);
 				})]
+				// The list forms have to come before the scalar ones: unquoted_string happily
+				// swallows a whole "{ ..., ... }" up to the semicolon and stores it verbatim.
+				| (x3::lit("sw_part_number") >> '=' >> string_list[([](auto& ctx) {
+					const auto& parts = x3::_attr(ctx);
+					if (!parts.empty()) {
+						x3::_val(ctx).swPartNumber = parts.front();
+					}
+					})] >> ';')
 				| (x3::lit("sw_part_number") >> '=' >> quoted_string[([](auto& ctx) {
 					x3::_val(ctx).swPartNumber = x3::_attr(ctx);
 					})] >> ';')
@@ -184,8 +201,20 @@ namespace common {
 				| (x3::lit("network") >> '=' >> unquoted_string[([](auto& ctx) {
 					x3::_val(ctx).network = parseNetworkType(x3::_attr(ctx));
 					})] >> ';')
+				| (x3::lit("ecu_address") >> '=' >> uint_list[([](auto& ctx) {
+					const auto& addresses = x3::_attr(ctx);
+					if (!addresses.empty()) {
+						x3::_val(ctx).ecuAddress = addresses.front();
+					}
+					})] >> ';')
 				| (x3::lit("ecu_address") >> '=' >> uint_literal[([](auto& ctx) {
 					x3::_val(ctx).ecuAddress = x3::_attr(ctx);
+					})] >> ';')
+				| (x3::lit("ecu_addr") >> '=' >> uint_list[([](auto& ctx) {
+					const auto& addresses = x3::_attr(ctx);
+					if (!addresses.empty()) {
+						x3::_val(ctx).ecuAddress = addresses.front();
+					}
 					})] >> ';')
 				| (x3::lit("ecu_addr") >> '=' >> uint_literal[([](auto& ctx) {
 					x3::_val(ctx).ecuAddress = x3::_attr(ctx);
@@ -232,7 +261,8 @@ namespace common {
 
 		BOOST_SPIRIT_DEFINE(description, vbf_header, uint_literal, uint8_literal,
 							full_erase_block, erase_block_list,
-							checksum_block, checksum_block_list);
+							checksum_block, checksum_block_list,
+							uint_list, string_list);
 
 		template<typename T>
 		T parseVBFHeader(T begin, T end, VBFHeader& data)

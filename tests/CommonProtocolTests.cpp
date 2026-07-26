@@ -218,3 +218,22 @@ TEST(VbfHeader, FlagsPackedDataFormat)
     // Absent means plain data, which is the historical assumption.
     EXPECT_FALSE(isPackedDataFormat(parseHeader(vbfHeader(""))));
 }
+
+// Volvo writes some scalar entries as brace lists. ecu_address used to fail the parse outright,
+// and sw_part_number silently kept the raw "{...}" text as the part number.
+TEST(VbfHeader, AcceptsBraceListForms)
+{
+    const auto listed = parseHeader(
+        "vbf_version = 2.6;\nheader {\n"
+        " sw_part_number = {\"YW4T-13B525-AB\", \"31808832\"};\n"
+        " sw_part_type = EXE;\n network = CAN_HS;\n"
+        " ecu_address = { 0x723, 0x00, 0xff };\n"
+        " file_checksum = 0x1234;\n}\n");
+    EXPECT_EQ(listed.swPartNumber, "YW4T-13B525-AB");
+    EXPECT_EQ(listed.ecuAddress, 0x723u);
+
+    // The scalar forms must keep working.
+    const auto scalar = parseHeader(vbfHeader(""));
+    EXPECT_EQ(scalar.swPartNumber, "31808832");
+    EXPECT_EQ(scalar.ecuAddress, 0x7Au);
+}
