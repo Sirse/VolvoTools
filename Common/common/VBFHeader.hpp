@@ -84,6 +84,13 @@ namespace common {
 
 	// True when the chunk payload is packed rather than plain data. We have no unpacker, so
 	// writing such a file to an ECU would brick it - callers must refuse instead.
+	//
+	// Packed VBF uses Volvo's own LZSS variant, not the generic one in LZSSCompressor. From the
+	// SDA research (see volvotools_bug_review B-11): window 1024 (EI=10), match length 2..17
+	// (EJ=4), threshold P=1, single continuous bitwise flag stream. A packed block keeps the same
+	// addr(4)/len(4)/data(len)/crc16(2) layout, where len is the COMPRESSED length, and the CRC
+	// covers the DECOMPRESSED bytes, so unpacking is self-verifying. No verified packed-VBF
+	// sample is available in this repo yet; until one is, refuse rather than guess.
 	inline bool isPackedDataFormat(const VBFHeader& header)
 	{
 		return header.dataFormatIdentifier != 0x00;
