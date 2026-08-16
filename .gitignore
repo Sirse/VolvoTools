@@ -44,3 +44,11 @@ build_review/
 **/build-x86/
 **/build-x64/
 **/build_review/
+
+# Run/bench artifacts produced by local runs
+/bench_out
+/did.csv
+/steps.csv
+/summary.toml
+/scenario.resolved.toml
+
