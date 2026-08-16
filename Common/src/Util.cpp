@@ -235,6 +235,37 @@ namespace {
         }
     }
 
+    std::string protocolName(unsigned long protocolId)
+    {
+        switch (protocolId) {
+        case CAN:
+            return "CAN";
+        case ISO14230:
+            return "ISO14230";
+        case ISO15765:
+            return "ISO15765";
+        case CAN_XON_XOFF:
+            return "CAN_XON_XOFF";
+        case ISO14230_PS:
+            return "ISO14230_PS";
+        case CAN_PS:
+            return "CAN_PS";
+        case ISO15765_PS:
+            return "ISO15765_PS";
+        case SW_CAN_PS:
+            return "SW_CAN_PS";
+        case SW_ISO15765_PS:
+            return "SW_ISO15765_PS";
+        case CAN_XON_XOFF_PS:
+            return "CAN_XON_XOFF_PS";
+        default: {
+            std::stringstream ss;
+            ss << "protocol=0x" << std::uppercase << std::hex << protocolId;
+            return ss.str();
+        }
+        }
+    }
+
     std::string toLower(std::string data) {
         std::transform(data.begin(), data.end(), data.begin(),
             [](unsigned char c) { return std::tolower(c); });
@@ -806,13 +837,13 @@ namespace {
                 }
                 startRawCanPassAllFilter(*channel);
                 LOG(INFO) << "Opened raw CAN channel bus=" << bus.name
-                    << " protocol=" << std::dec << protocolId
+                    << " protocol=" << protocolName(channel->getProtocolId())
                     << " baudrate=" << baudrate
                     << " flags=0x" << std::hex << localFlags;
                 return channel;
             }
             catch (const std::exception& ex) {
-                LOG(WARNING) << "Failed to open raw CAN channel protocol=" << protocolId
+                LOG(WARNING) << "Failed to open raw CAN channel protocol=" << protocolName(protocolId)
                     << " baudrate=" << std::dec << baudrate << ": " << ex.what();
             }
         }

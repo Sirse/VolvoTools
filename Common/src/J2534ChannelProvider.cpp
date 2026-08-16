@@ -94,7 +94,7 @@ std::vector<std::unique_ptr<j2534::J2534Channel>> J2534ChannelProvider::getAllCh
                 canId = ecu.canId;
             }
         }
-        LOG(INFO) << "J2534ChannelProvider opening bus protocol=" << bus.protocolId
+        LOG(INFO) << "J2534ChannelProvider opening bus protocol=" << protocolName(bus.protocolId)
             << " baudrate=" << bus.baudrate << " canId=0x" << std::hex << canId;
         result.emplace_back(createChannelByBusConf(_j2534, bus, canId, _baudrateOverride));
         LOG(INFO) << "J2534ChannelProvider bus opened, total=" << std::dec << result.size();
@@ -156,11 +156,12 @@ J2534ChannelProvider::getUdsChannelsByBus(uint32_t ecuId, const std::string& bus
 std::unique_ptr<j2534::J2534Channel> J2534ChannelProvider::getChannelForEcu(uint32_t ecuId) const
 {
     const auto ecuInfo{ getEcuInfoByEcuId(_carPlatform, ecuId) };
+    auto channel = createChannelByBusConf(_j2534, std::get<0>(ecuInfo), std::get<1>(ecuInfo).canId, _baudrateOverride);
     LOG(INFO) << "J2534ChannelProvider getChannelForEcu ecu=0x" << std::hex << ecuId
-        << " protocol=" << std::dec << std::get<0>(ecuInfo).protocolId
+        << " protocol=" << (channel ? protocolName(channel->getProtocolId()) : "none")
         << " baudrate=" << std::get<0>(ecuInfo).baudrate
         << " canId=0x" << std::hex << std::get<1>(ecuInfo).canId;
-    return createChannelByBusConf(_j2534, std::get<0>(ecuInfo), std::get<1>(ecuInfo).canId, _baudrateOverride);
+    return channel;
 }
 
 } // namespace common

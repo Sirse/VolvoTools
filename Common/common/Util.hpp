@@ -41,6 +41,11 @@ namespace common {
     std::string formatHexBytesLower(const std::vector<uint8_t>& data);
     std::string j2534StatusToString(unsigned long status);
 
+    // Human-readable name of a J2534 protocol id (CAN, ISO15765, ..._PS variants and the
+    // raw-CAN id space). Unknown ids render as "protocol=0x<hex>" so the value is never
+    // silently dropped.
+    std::string protocolName(unsigned long protocolId);
+
     std::string toLower(std::string data);
 
 #ifdef UNICODE
