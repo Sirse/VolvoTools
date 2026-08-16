@@ -122,33 +122,49 @@ std::vector<uint8_t> UDSRequest::process(const j2534::J2534Channel& channel, siz
     }
     std::vector<uint8_t> result;
     bool pendingSeen = false;
-    readMsgsWithPendingBudget([&]() {
-    channel.readMsgs([&result, &pendingSeen, this](const uint8_t* data, size_t dataSize) {
-        LOG(DEBUG) << "UDS RX raw=" << toHexString(frameToVector(data, dataSize));
-        try {
-            checkUDSError(_requestId, data, dataSize);
-        }
-        catch (const UDSError& ex) {
-            LOG(WARNING) << "UDS NRC request=0x" << std::hex << static_cast<int>(_requestId)
-                         << " nrc=0x" << static_cast<int>(ex.getErrorCode()) << " " << ex.what();
-            if (ex.getErrorCode() == UDSError::ErrorCode::RequestReceivedResponsePending) {
-                pendingSeen = true;
+    try {
+        readMsgsWithPendingBudget([&]() {
+        channel.readMsgs([&result, &pendingSeen, this](const uint8_t* data, size_t dataSize) {
+            LOG(DEBUG) << "UDS RX raw=" << toHexString(frameToVector(data, dataSize));
+            try {
+                checkUDSError(_requestId, data, dataSize);
+            }
+            catch (const UDSError& ex) {
+                LOG(WARNING) << "UDS NRC request=0x" << std::hex << static_cast<int>(_requestId)
+                             << " nrc=0x" << static_cast<int>(ex.getErrorCode()) << " " << ex.what();
+                if (ex.getErrorCode() == UDSError::ErrorCode::RequestReceivedResponsePending) {
+                    pendingSeen = true;
+                    return true;
+                }
+                throw;
+            }
+            if(dataSize < 5) {
                 return true;
             }
-            throw;
+            if(data[4] != _requestId + 0x40) {
+                return true;
+            }
+            result.reserve(result.size() + dataSize);
+            std::copy(data, data + dataSize, std::back_inserter(result));
+            LOG(DEBUG) << "UDS RX accepted payload=" << toHexString(payloadFromFrame(data, dataSize));
+            return false;
+        }, timeout);
+        }, pendingSeen, pendingTimeout);
+    }
+    catch (const UDSRequestRxTimeout&) {
+        // A multi-frame request whose write "succeeded" but that never got an answer is the
+        // classic symptom of the adapter aborting the segmented TX internally and still
+        // reporting STATUS_NOERROR (e.g. a flow-control timeout inside the driver). Say so
+        // instead of leaving a bare RX timeout that reads as an ECU problem. On classic CAN a
+        // single ISO-TP frame carries 7 payload bytes (1 byte PCI); anything longer segments.
+        if (_data.size() > 7) {
+            LOG(ERROR) << "UDS RX timeout for can=0x" << std::hex << _canId
+                       << " request=0x" << static_cast<int>(_requestId)
+                       << " len=" << std::dec << _data.size()
+                       << " (multi-frame; adapter may have aborted the segmented TX)";
         }
-        if(dataSize < 5) {
-            return true;
-        }
-        if(data[4] != _requestId + 0x40) {
-            return true;
-        }
-        result.reserve(result.size() + dataSize);
-        std::copy(data, data + dataSize, std::back_inserter(result));
-        LOG(DEBUG) << "UDS RX accepted payload=" << toHexString(payloadFromFrame(data, dataSize));
-        return false;
-    }, timeout);
-    }, pendingSeen, pendingTimeout);
+        throw;
+    }
     if(result.empty()) {
         LOG(WARNING) << "UDS RX completed without payload/no matching response can=0x" << std::hex << _canId
                      << " request=0x" << static_cast<int>(_requestId);

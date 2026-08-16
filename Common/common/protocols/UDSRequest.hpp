@@ -28,10 +28,15 @@ public:
 };
 
 // Total extra time an ECU may buy itself by answering 7F <sid> 78 (RequestReceivedResponsePending).
-// This is the P4CANMax of the vehicle configuration and is deliberately separate from the
-// per-read timeout: erase and transfer legitimately keep an ECU busy for minutes, while the plain
-// timeout is sized for a normal round trip. The budget only keeps ticking while the ECU actually
-// emits pending responses, so a silent ECU still fails after one ordinary timeout.
+// This is the P4CANMax of the vehicle configuration (300000 ms, confirmed in common/data.yaml on
+// every bus) and is deliberately separate from the per-read timeout: erase and transfer
+// legitimately keep an ECU busy for minutes, while the plain timeout is sized for a normal round
+// trip. The budget only keeps ticking while the ECU actually emits pending responses, so a silent
+// ECU still fails after one ordinary timeout.
+//
+// Do not "align" this with the SDA trace value P2*CAN: 4500 - that is the server's P2* (initial
+// response-pending) timing, a different parameter. P4CANMax is the tester-side total pending
+// budget and the correct value here.
 constexpr size_t kResponsePendingTimeout = 300000;
 
 class UDSRequest {
