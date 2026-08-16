@@ -609,6 +609,24 @@ namespace {
         channel.setConfig(config);
     }
 
+    static void setupChannelIso15765Parameters(j2534::J2534Channel& channel)
+    {
+        if (channel.getProtocolId() != ISO15765 && channel.getProtocolId() != ISO15765_PS) {
+            return;
+        }
+        // The adapter used to be left entirely on driver defaults. Ask for no inter-frame delay
+        // on our own consecutive frames (STMIN=0) and no block-size cap (BS=0, send all CF after
+        // one FC) so we never stall on the tester side; the ECU's own FC still governs the
+        // response timing. Failing to set these used to be silent, so log the result.
+        std::vector<SCONFIG> config(2);
+        config[0].Parameter = ISO15765_STMIN;
+        config[0].Value = 0;
+        config[1].Parameter = ISO15765_BS;
+        config[1].Value = 0;
+        const auto status = channel.setConfig(config);
+        LOG(INFO) << "ISO15765 channel params: STMIN=0 BS=0 status=" << j2534StatusToString(status);
+    }
+
     static void setupChannelPins(j2534::J2534Channel& channel)
     {
         if (channel.getProtocolId() == ISO14230_PS || channel.getProtocolId() == ISO15765_PS) {
@@ -665,15 +683,27 @@ namespace {
             }
 
             setupChannelParameters(*channel, samplePoint);
+            setupChannelIso15765Parameters(*channel);
             setupChannelPins(*channel);
 
             if (canId) {
-                prepareUDSChannel(*channel, canId);
+                if (!prepareUDSChannel(*channel, canId)) {
+                    LOG(ERROR) << "Failed to set up UDS flow-control filter for canId=0x"
+                        << std::hex << canId;
+                    continue;
+                }
                 std::this_thread::sleep_for(std::chrono::milliseconds(20));
             }
 
+            // The fallback loop tries ISO15765_PS first, then ISO15765 (with PHYSICAL_CHANNEL at
+            // 125k). Say which one actually won, so a bench log can distinguish the two instead of
+            // guessing from the bus config.
+            LOG(INFO) << "Opened UDS channel protocol=" << protocolName(channel->getProtocolId())
+                      << " flags=0x" << std::hex << channel->getFlags() << " baudrate=" << std::dec << baudrate;
+
             return std::move(channel);
         }
+        LOG(ERROR) << "Failed to open UDS channel: no usable protocol/filter combination";
         return {};
     }
 
