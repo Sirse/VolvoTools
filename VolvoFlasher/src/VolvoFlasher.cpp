@@ -167,7 +167,7 @@ bool getRunOptions(int argc, const char* argv[], std::string& deviceName,
 	bool& pinUpward, bool& resetFunctional, unsigned long& programHoldSeconds,
 	ProgramMode& flashProgramMode, ReadFormat& readFormat,
 	std::vector<std::string>& rawData, bool& noWakeup, bool& attachRunningSbl,
-	bool& udsRawWake, uint8_t& udsRawSession, bool& noSblAuth) {
+	bool& udsRawWake, uint8_t& udsRawSession, bool& noSblAuth, bool& skipFallAsleep) {
 	argparse::ArgumentParser program("VolvoFlasher", "1.0", argparse::default_arguments::help);
     const auto addDebugArgument = [](argparse::ArgumentParser& parser) {
         parser.add_argument("--debug").default_value(false).implicit_value(true).nargs(0)
@@ -188,7 +188,9 @@ bool getRunOptions(int argc, const char* argv[], std::string& deviceName,
 	flash_command.add_argument("--program-mode").required()
 		.help("Programming mode handling, required: vehicle or bench");
 	flash_command.add_argument("--attach-running-sbl").default_value(false).implicit_value(true).nargs(0)
-		.help("Flash through an already running RAM SBL; skips the programming-session broadcast, the pre-load authorize, and SBL load/start");
+		.help("Flash through an already running RAM SBL; skips the programming-session broadcast and SBL load/start");
+	flash_command.add_argument("--skip-fall-asleep").default_value(false).implicit_value(true).nargs(0)
+		.help("Skip the programming-session broadcast prelude; use when the module is already up (bench, prepared by CEM, or attached)");
 
 	argparse::ArgumentParser read_command("read", "1.0", argparse::default_arguments::help);
     addDebugArgument(read_command);
@@ -202,6 +204,8 @@ bool getRunOptions(int argc, const char* argv[], std::string& deviceName,
 		.help("Programming mode handling for UDS reading: vehicle or bench");
 	read_command.add_argument("--attach-running-sbl").default_value(false).implicit_value(true).nargs(0)
 		.help("Read through an already running RAM SBL; skips the programming-session broadcast and SBL load/start");
+	read_command.add_argument("--skip-fall-asleep").default_value(false).implicit_value(true).nargs(0)
+		.help("Skip the programming-session broadcast prelude; use when the module is already up (bench, prepared by CEM, or attached)");
 	read_command.add_argument("--no-sbl-auth").default_value(false).implicit_value(true).nargs(0)
 		.help("Skip SecurityAccess (27 01) against the SBL; use with a resident/read SBL that does not implement it");
 
@@ -264,6 +268,7 @@ bool getRunOptions(int argc, const char* argv[], std::string& deviceName,
 			sblPath = flash_command.get("-s");
 			flashProgramMode = parseProgramMode(flash_command.get<std::string>("--program-mode"));
 			attachRunningSbl = flash_command.get<bool>("--attach-running-sbl");
+			skipFallAsleep = flash_command.get<bool>("--skip-fall-asleep");
 			runMode = RunMode::Flash;
 		}
 		else if (program.is_subcommand_used(read_command)) {
@@ -275,6 +280,7 @@ bool getRunOptions(int argc, const char* argv[], std::string& deviceName,
 			flashProgramMode = parseProgramMode(read_command.get<std::string>("--program-mode"));
 			attachRunningSbl = read_command.get<bool>("--attach-running-sbl");
 			noSblAuth = read_command.get<bool>("--no-sbl-auth");
+			skipFallAsleep = read_command.get<bool>("--skip-fall-asleep");
 			runMode = RunMode::Read;
 		}
 		else if (program.is_subcommand_used(test_command)) {
@@ -917,7 +923,7 @@ void doSomeStuff(std::unique_ptr<j2534::J2534> j2534, uint64_t pin)
 
 void UDSFlash(common::CarPlatform carPlatform, uint8_t ecuId,
 	std::unique_ptr<j2534::J2534> j2534, unsigned long baudrate, uint64_t pin, const std::string& flashPath,
-	const std::string& sblPath, ProgramMode programMode, bool attachRunningSbl)
+	const std::string& sblPath, ProgramMode programMode, bool attachRunningSbl, bool skipFallAsleepCli)
 {
 	LOG(INFO) << "UDS flash start platform=" << static_cast<int>(carPlatform)
 		<< " ecu=0x" << std::hex << static_cast<int>(ecuId)
@@ -944,13 +950,14 @@ void UDSFlash(common::CarPlatform carPlatform, uint8_t ecuId,
 		sblProvider = std::make_unique<flasher::SBLProviderVBF>(bootloader);
 	}
 
-	bool skipFallAsleep = false;
+	bool skipFallAsleep = skipFallAsleepCli;
 	if (programMode == ProgramMode::Vehicle) {
 		UDSProgramMode(carPlatform, ecuId, *j2534, 0);
 		skipFallAsleep = true;
 	}
 	else {
-		LOG(INFO) << "Bench program mode selected, skipping CEM programming mode";
+		LOG(INFO) << "Bench program mode selected, skipping CEM programming mode"
+			<< (skipFallAsleepCli ? "; --skip-fall-asleep set, skipping broadcast prelude" : "");
 	}
 
 	flasher::FlasherParameters flasherParameters{
@@ -1164,8 +1171,8 @@ void UDSRaw(common::CarPlatform carPlatform, uint8_t ecuId, j2534::J2534& j2534,
 		if (skipFallAsleep) {
 			LOG(INFO) << "Programming-session broadcast skipped, vehicle programming mode was prepared by CEM";
 		}
-		else if (!common::UDSProtocolCommonSteps::broadcastProgrammingSession(channels)) {
-			throw std::runtime_error("SBL fall asleep failed");
+		else if (!common::UDSProtocolCommonSteps::broadcastProgrammingSessionPrelude(channels)) {
+			throw std::runtime_error("SBL programming-session broadcast failed");
 		}
 		common::UDSProtocolCommonSteps::keepAlive(channel);
 		if (!common::UDSProtocolCommonSteps::authorize(channel, canId, common::getPinArray(pin))) {
@@ -1560,10 +1567,29 @@ void saveReadResult(const std::string& path, uint32_t start, const std::vector<u
 	}
 }
 
+// Writes <dump>.integrity.txt next to the saved artifact: the verdict, which algorithm matched,
+// the CRC the ECU returned, both computed sums, block count, size and start address. Always
+// written - even when the SBL sent no CRC, the file records that this was checked. This is the
+// "quiet" contract: the console stays clean on success, but the evidence stays on disk.
+//
+// The body is produced by common::formatIntegrityReport, which prints algorithm only when the
+// verdict is Ok and ecu_crc only when the response actually carried a CRC (see its tests).
+void writeIntegrityReport(const std::string& dumpPath, const common::UploadReadResult& upload)
+{
+	const std::string reportPath = dumpPath + ".integrity.txt";
+	std::ofstream report(reportPath);
+	if (!report) {
+		LOG(ERROR) << "Failed to write integrity report: " << reportPath;
+		return;
+	}
+	report << common::formatIntegrityReport(upload);
+	LOG(INFO) << "Integrity report written: " << reportPath;
+}
+
 void readFlash(std::unique_ptr<j2534::J2534> j2534, common::CarPlatform carPlatform, uint8_t ecuId,
 	const std::string& flashPath, unsigned long start, unsigned long datasize, uint64_t pin,
 	const std::string& sblPath, ProgramMode programMode, ReadFormat readFormat, bool attachRunningSbl,
-	bool noSblAuth)
+	bool noSblAuth, bool skipFallAsleepCli)
 {
 	const auto ecuInfo{ common::getEcuInfoByEcuId(carPlatform, ecuId) };
 	if (std::get<0>(ecuInfo).protocolId == ISO15765) {
@@ -1591,13 +1617,14 @@ void readFlash(std::unique_ptr<j2534::J2534> j2534, common::CarPlatform carPlatf
 		}
 		std::vector<uint8_t> bin;
 
-		bool skipFallAsleep = false;
+		bool skipFallAsleep = skipFallAsleepCli;
 		if (programMode == ProgramMode::Vehicle) {
 			UDSProgramMode(carPlatform, ecuId, *j2534, 0);
 			skipFallAsleep = true;
 		}
 		else {
-			LOG(INFO) << "Bench program mode selected, skipping CEM programming mode";
+			LOG(INFO) << "Bench program mode selected, skipping CEM programming mode"
+				<< (skipFallAsleepCli ? "; --skip-fall-asleep set, skipping broadcast prelude" : "");
 		}
 
 		flasher::FlasherParameters flasherParameters{
@@ -1629,8 +1656,17 @@ void readFlash(std::unique_ptr<j2534::J2534> j2534, common::CarPlatform carPlatf
 		if (!success && !flasher.getLastError().empty()) {
 			std::cout << "Last error: " << flasher.getLastError() << std::endl;
 		}
-		if (success) {
+		// A dump that was actually read (bytes arrived, size was verified) is always saved. The
+		// integrity verdict is diagnostic: a CRC mismatch on the closing 77 is not a reason to
+		// discard the payload, and it does not make the process exit non-zero.
+		if (!bin.empty()) {
 			saveReadResult(flashPath, static_cast<uint32_t>(start), bin, readFormat);
+			writeIntegrityReport(flashPath, flasher.getLastUploadResult());
+		}
+		// Non-zero exit stays reserved for real read failures: NRC, timeout, undershoot, size
+		// mismatch. Those leave the reader state off Done.
+		if (!success) {
+			throw std::runtime_error("Reading failed (see log for details)");
 		}
 		return;
 	}
@@ -1809,11 +1845,12 @@ int main(int argc, const char* argv[]) {
 	bool udsRawWake = false;
 	uint8_t udsRawSession = 0;
 	bool noSblAuth = false;
+	bool skipFallAsleep = false;
 	const auto devices = common::getAvailableDevices();
 	if (getRunOptions(argc, argv, deviceName, baudrate, flashPath, pin, ecuId, start, datasize,
 		runMode, sblPath, carPlatform, scanPinsUpward, resetFunctional, programHoldSeconds, flashProgramMode,
 		readFormat, rawData, noWakeup, attachRunningSbl,
-		udsRawWake, udsRawSession, noSblAuth)) {
+		udsRawWake, udsRawSession, noSblAuth, skipFallAsleep)) {
 		j2534::DeviceInfo device;
 		try {
 			device = common::selectSingleDevice(devices, deviceName);
@@ -1864,13 +1901,14 @@ int main(int argc, const char* argv[]) {
 			}
 			else if (runMode == RunMode::Read) {
 				readFlash(std::move(j2534), carPlatform, ecuId, flashPath, start, datasize,
-					pin, sblPath, flashProgramMode, readFormat, attachRunningSbl, noSblAuth);
+					pin, sblPath, flashProgramMode, readFormat, attachRunningSbl, noSblAuth,
+					skipFallAsleep);
 			}
 			else if (runMode == RunMode::Flash) {
 				const auto ecuInfo{ common::getEcuInfoByEcuId(carPlatform, ecuId) };
 				if (std::get<0>(ecuInfo).protocolId == ISO15765) {
 					UDSFlash(carPlatform, ecuId, std::move(j2534), baudrate, pin, flashPath, sblPath, flashProgramMode,
-						attachRunningSbl);
+						attachRunningSbl, skipFallAsleep);
 				}
 				else {
 					D2Flash(flashPath, std::move(j2534), baudrate);

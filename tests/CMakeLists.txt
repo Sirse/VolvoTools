@@ -8,6 +8,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 add_executable(VolvoToolsTests
     TestMain.cpp
     CommonProtocolTests.cpp
+    UploadIntegrityTests.cpp
     CliParserTests.cpp
     ScriptModelTests.cpp
 )

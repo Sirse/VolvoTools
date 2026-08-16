@@ -1327,14 +1327,25 @@ namespace {
 
     uint16_t crc16(const uint8_t* data_p, size_t length)
     {
-        uint16_t crc = 0xFFFF;
+        uint16_t crc = crc16Init();
 
         while (length--) {
-            uint8_t x = crc >> 8 ^ *data_p++;
-            x ^= x >> 4;
-            crc = (crc << 8) ^ ((uint16_t)(x << 12)) ^ ((uint16_t)(x << 5)) ^ ((uint16_t)x);
+            crc = crc16Update(crc, *data_p++);
         }
         return crc;
+    }
+
+    uint16_t crc16Init()
+    {
+        return 0xFFFF;
+    }
+
+    uint16_t crc16Update(uint16_t crc, uint8_t byte)
+    {
+        uint8_t x = (crc >> 8) ^ byte;
+        x ^= x >> 4;
+        return static_cast<uint16_t>((crc << 8) ^ (static_cast<uint16_t>(x << 12))
+            ^ (static_cast<uint16_t>(x << 5)) ^ static_cast<uint16_t>(x));
     }
 
 } // namespace common

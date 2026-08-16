@@ -1,6 +1,7 @@
 #pragma once
 
 #include "common/VBF.hpp"
+#include "common/protocols/UploadIntegrity.hpp"
 
 #include <j2534/J2534.hpp>
 #include <j2534/J2534Channel.hpp>
@@ -46,9 +47,13 @@ namespace common {
                                  const std::function<void(size_t)>& progressCallback);
         static bool transferChunk(const j2534::J2534Channel& channel, uint32_t canId, const VBFChunk& chunk,
                                  const std::function<void(size_t)>& progressCallback);
-        static bool readDataByUpload(const j2534::J2534Channel& channel, uint32_t canId, uint32_t startAddr,
-                                     uint32_t dataSize, std::vector<uint8_t>& output,
-                                     const std::function<void(size_t)>& progressCallback);
+        // Runs a 0x35/0x36/0x37 upload. success is true as soon as the full requested volume was
+        // collected and its size matched; the RequestTransferExit integrity verdict is computed
+        // after that and never flips success. The result carries the payload and everything
+        // needed for the integrity report (status, returned/expected CRCs, block count, size).
+        static UploadReadResult readDataByUpload(const j2534::J2534Channel& channel, uint32_t canId,
+                                                 uint32_t startAddr, uint32_t dataSize,
+                                                 const std::function<void(size_t)>& progressCallback = {});
         static bool eraseFlash(const j2534::J2534Channel& channel, uint32_t canId, const VBF& data);
         static bool eraseChunk(const j2534::J2534Channel& channel, uint32_t canId, const VBFChunk& chunk);
         static bool startRoutine(const j2534::J2534Channel& channel, uint32_t canId, uint32_t addr);

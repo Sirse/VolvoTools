@@ -174,4 +174,10 @@ namespace common {
 
     uint16_t crc16(const uint8_t* data_p, size_t length);
 
+    // Incremental CRC16-CCITT-FALSE (poly 0x1021, init 0xFFFF, non-reflected, no xorout): feed
+    // the running value from crc16()/crc16Init() one byte at a time. Keeps the same result as
+    // crc16() over the same byte sequence.
+    uint16_t crc16Init();
+    uint16_t crc16Update(uint16_t crc, uint8_t byte);
+
 } // namespace common

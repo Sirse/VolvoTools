@@ -2,6 +2,7 @@
 
 #include "common/protocols/UDSRequest.hpp"
 #include "common/protocols/UDSError.hpp"
+#include "common/protocols/UploadIntegrity.hpp"
 #include "common/Util.hpp"
 
 #include <easylogging++.h>
@@ -283,13 +284,19 @@ namespace common {
             LOG(ERROR) << "TransferExit got unexpected response: " << toHexString(response);
             return false;
         }
-        if (response.size() >= 7) {
-            const uint16_t returnedCrc = (static_cast<uint16_t>(response[5]) << 8) | response[6];
-            if (returnedCrc != expectedCrc) {
-                LOG(ERROR) << "TransferExit CRC mismatch, expected=0x" << std::hex << expectedCrc
-                           << " actual=0x" << returnedCrc;
-                return false;
-            }
+        // The download contract requires the block CRC: 77 <crc_hi> <crc_lo>. A bare 77 was
+        // previously accepted silently, which meant the write was never verified on an ECU that
+        // omits the CRC. Missing CRC where the VBF block CRC profile expects one is an error.
+        if (response.size() < 7) {
+            LOG(ERROR) << "TransferExit missing block CRC (bare 77), expected=0x" << std::hex
+                       << expectedCrc << " response=" << toHexString(response);
+            return false;
+        }
+        const uint16_t returnedCrc = (static_cast<uint16_t>(response[5]) << 8) | response[6];
+        if (returnedCrc != expectedCrc) {
+            LOG(ERROR) << "TransferExit CRC mismatch, expected=0x" << std::hex << expectedCrc
+                       << " actual=0x" << returnedCrc;
+            return false;
         }
         return true;
     }
@@ -374,18 +381,21 @@ namespace common {
         return true;
     }
 
-    bool finishUpload(const j2534::J2534Channel& channel, uint32_t canId)
+    std::vector<uint8_t> finishUpload(const j2534::J2534Channel& channel, uint32_t canId)
     {
         UDSRequest transferExitRequest{ canId, { 0x37 } };
         const auto response = transferExitRequest.process(channel, 10000);
         if (response.size() < 5 || response[4] != 0x77) {
             LOG(ERROR) << "Upload TransferExit got unexpected response: " << toHexString(response);
-            return false;
+            throw std::runtime_error("Upload TransferExit got unexpected response");
         }
-        return true;
+        return response;
     }
 
-    bool finishUploadBestEffort(const j2534::J2534Channel& channel, uint32_t canId)
+    // Sends the TransferExit and returns the raw response; exceptions are logged and swallowed so
+    // cleanup never masks the original error. Only used on error paths, where the read already
+    // failed and the close is best-effort.
+    std::vector<uint8_t> finishUploadBestEffort(const j2534::J2534Channel& channel, uint32_t canId)
     {
         try {
             return finishUpload(channel, canId);
@@ -396,25 +406,29 @@ namespace common {
         catch (...) {
             LOG(WARNING) << "Upload TransferExit best-effort cleanup failed";
         }
-        return false;
+        return {};
     }
 
-    bool UDSProtocolCommonSteps::readDataByUpload(const j2534::J2534Channel& channel, uint32_t canId,
-                                                  uint32_t startAddr, uint32_t dataSize,
-                                                  std::vector<uint8_t>& output,
-                                                  const std::function<void(size_t)>& progressCallback)
+    UploadReadResult UDSProtocolCommonSteps::readDataByUpload(const j2534::J2534Channel& channel, uint32_t canId,
+                                                              uint32_t startAddr, uint32_t dataSize,
+                                                              const std::function<void(size_t)>& progressCallback)
     {
+        UploadReadResult result;
+        result.startAddress = startAddr;
+        result.dataSize = dataSize;
         LOG(INFO) << "readDataByUpload enter addr=0x" << std::hex << startAddr
                   << " size=0x" << dataSize;
         if (dataSize == 0) {
-            output.clear();
+            result.success = true;
+            result.integrityStatus = IntegrityStatus::NotChecked;
             LOG(INFO) << "readDataByUpload completed empty range";
-            return true;
+            return result;
         }
         bool uploadStarted = false;
+        UploadIntegrityAccumulator accumulator;
         try {
-            output.clear();
-            output.reserve(dataSize);
+            result.payload.clear();
+            result.payload.reserve(dataSize);
 
             const std::vector<uint8_t> requestUploadPayload = {
                 0x35, 0x00, 0x44,
@@ -431,7 +445,7 @@ namespace common {
             const auto uploadResponse = requestUploadRequest.process(channel, 10000);
             if (uploadResponse.size() < 8 || uploadResponse[4] != 0x75) {
                 LOG(ERROR) << "RequestUpload got unexpected response: " << toHexString(uploadResponse);
-                return false;
+                return result;
             }
             uploadStarted = true;
 
@@ -439,14 +453,14 @@ namespace common {
                 LOG(ERROR) << "RequestUpload unsupported length format: 0x"
                            << std::hex << static_cast<int>(uploadResponse[5]);
                 finishUploadBestEffort(channel, canId);
-                return false;
+                return result;
             }
 
             const size_t maxBlockSize = (static_cast<size_t>(uploadResponse[6]) << 8) | uploadResponse[7];
             if (maxBlockSize <= 2) {
                 LOG(ERROR) << "RequestUpload invalid max block size: 0x" << std::hex << maxBlockSize;
                 finishUploadBestEffort(channel, canId);
-                return false;
+                return result;
             }
             const size_t maxPayloadSize = maxBlockSize - 2;
             LOG(INFO) << "readDataByUpload maxBlockSize=0x" << std::hex << maxBlockSize
@@ -454,25 +468,25 @@ namespace common {
 
             std::this_thread::sleep_for(std::chrono::milliseconds(30));
             uint8_t blockIndex = 1;
-            while (output.size() < dataSize) {
+            while (result.payload.size() < dataSize) {
                 UDSRequest transferDataRequest{ canId, { 0x36, blockIndex } };
                 LOG(DEBUG) << "TransferData upload request block=0x" << std::hex
                           << static_cast<int>(blockIndex)
-                          << " outputOffset=0x" << output.size()
-                          << " remaining=0x" << (dataSize - output.size());
+                          << " outputOffset=0x" << result.payload.size()
+                          << " remaining=0x" << (dataSize - result.payload.size());
                 const auto transferResponse = transferDataRequest.process(channel, { blockIndex }, 10, 60000);
-                const size_t remaining = dataSize - output.size();
+                const size_t remaining = dataSize - result.payload.size();
                 LOG(DEBUG) << "TransferData upload accepted block=0x" << std::hex
                           << static_cast<int>(blockIndex)
                           << " payloadAfterStrip=" << toHexString(transferResponse)
                           << " payloadSize=0x" << transferResponse.size()
-                          << " outputOffset=0x" << output.size();
+                          << " outputOffset=0x" << result.payload.size();
                 if (transferResponse.empty()) {
                     LOG(ERROR) << "TransferData upload returned empty payload after positive 0x76 block=0x"
                                << std::hex << static_cast<int>(blockIndex)
                                << "; empty transferResponseParameterRecord is not treated as flash zeros";
                     finishUploadBestEffort(channel, canId);
-                    return false;
+                    return result;
                 }
                 if (transferResponse.size() > maxPayloadSize) {
                     LOG(ERROR) << "TransferData upload block too large, block=0x"
@@ -480,7 +494,7 @@ namespace common {
                                << " size=0x" << transferResponse.size()
                                << " max=0x" << maxPayloadSize;
                     finishUploadBestEffort(channel, canId);
-                    return false;
+                    return result;
                 }
                 if (transferResponse.size() > remaining) {
                     LOG(ERROR) << "TransferData upload returned more data than requested, block=0x"
@@ -488,25 +502,80 @@ namespace common {
                                << " size=0x" << transferResponse.size()
                                << " remaining=0x" << remaining;
                     finishUploadBestEffort(channel, canId);
-                    return false;
+                    return result;
+                }
+                // Feed the full positive 0x76 response (SID + counter + payload) to the integrity
+                // accumulator before the SID/counter are stripped, so the SDA wire CRC sees the
+                // exact flattened stream the ECU covered. Streaming stays - the wire CRC cannot be
+                // recomputed from the assembled image afterwards.
+                {
+                    std::vector<uint8_t> fullResponse{ 0x76, blockIndex };
+                    fullResponse.insert(fullResponse.end(), transferResponse.cbegin(), transferResponse.cend());
+                    accumulator.addResponse(fullResponse);
                 }
                 LOG(DEBUG) << "TransferData upload copy block=0x" << std::hex
                           << static_cast<int>(blockIndex)
                           << " bytes=0x" << transferResponse.size()
-                          << " outputOffset=0x" << output.size();
-                output.insert(output.end(), transferResponse.cbegin(), transferResponse.cend());
-                progressCallback(transferResponse.size());
+                          << " outputOffset=0x" << result.payload.size();
+                result.payload.insert(result.payload.end(), transferResponse.cbegin(), transferResponse.cend());
+                if (progressCallback) {
+                    progressCallback(transferResponse.size());
+                }
                 ++blockIndex;
             }
 
-            if (output.size() != dataSize) {
+            if (result.payload.size() != dataSize) {
                 LOG(ERROR) << "readDataByUpload size mismatch expected=0x" << std::hex << dataSize
-                           << " actual=0x" << output.size();
+                           << " actual=0x" << result.payload.size();
                 finishUploadBestEffort(channel, canId);
-                return false;
+                return result;
             }
-            if (!finishUploadBestEffort(channel, canId)) {
-                LOG(WARNING) << "Upload TransferExit did not complete cleanly after full read payload; keeping data";
+
+            // The full volume was collected and its size matched - the read itself succeeded.
+            // Nothing after this point may flip success: the integrity verdict is diagnostic.
+            result.success = true;
+            result.blockCount = accumulator.blockCount();
+
+            // The verdict: try the TransferExit, but a missing 77 is not a read failure either.
+            try {
+                result.transferExitResponse = finishUpload(channel, canId);
+            }
+            catch (const std::exception& ex) {
+                LOG(WARNING) << "readDataByUpload TransferExit did not complete: " << ex.what();
+            }
+            catch (...) {
+                LOG(WARNING) << "readDataByUpload TransferExit did not complete";
+            }
+            result.integrityStatus = IntegrityStatus::NoTransferExit;
+            if (!result.transferExitResponse.empty()) {
+                const auto integrity = resolveTransferExit(result.transferExitResponse, accumulator);
+                result.integrityStatus = integrity.status;
+                result.crcPresent = integrity.crcPresent;
+                result.integrityProfileUsed = integrity.profileUsed;
+                result.returnedCrc = integrity.returnedCrc;
+                result.computedImageCrc = integrity.computedImageCrc;
+                result.computedSdaWireCrc = integrity.computedSdaWireCrc;
+                switch (integrity.status) {
+                case IntegrityStatus::Ok:
+                    LOG(INFO) << "readDataByUpload integrity ok, algorithm="
+                              << uploadIntegrityProfileName(integrity.profileUsed);
+                    break;
+                case IntegrityStatus::NotChecked:
+                    LOG(INFO) << "readDataByUpload integrity not checked (SBL returned no CRC)";
+                    break;
+                case IntegrityStatus::Unverified:
+                    LOG(WARNING) << "Upload CRC matched no known algorithm; dump is saved, verify it "
+                                    "manually. ecu_crc=0x" << std::hex << integrity.returnedCrc
+                                 << " image_crc16=0x" << integrity.computedImageCrc
+                                 << " sda47_wire_crc16=0x" << integrity.computedSdaWireCrc
+                                 << " blocks=" << std::dec << accumulator.blockCount()
+                                 << " size=0x" << std::hex << result.payload.size();
+                    break;
+                case IntegrityStatus::NoTransferExit:
+                    LOG(WARNING) << "Upload returned no 77 TransferExit response; dump is saved, "
+                                    "verify it manually";
+                    break;
+                }
             }
             uploadStarted = false;
         }
@@ -516,18 +585,18 @@ namespace common {
             if (uploadStarted) {
                 finishUploadBestEffort(channel, canId);
             }
-            return false;
+            return result;
         }
         catch (...) {
             LOG(ERROR) << "readDataByUpload error, addr = 0x" << std::hex << startAddr;
             if (uploadStarted) {
                 finishUploadBestEffort(channel, canId);
             }
-            return false;
+            return result;
         }
         LOG(INFO) << "readDataByUpload completed addr=0x" << std::hex << startAddr
                   << " size=0x" << dataSize;
-        return true;
+        return result;
     }
 
     bool UDSProtocolCommonSteps::eraseFlash(const j2534::J2534Channel& channel, uint32_t canId, const VBF& data)

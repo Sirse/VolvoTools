@@ -48,6 +48,15 @@ UDSReader::~UDSReader()
 {
 }
 
+bool commitUploadResult(const common::UploadReadResult& upload, std::vector<uint8_t>& output)
+{
+    // Hand the payload out unconditionally and before any failure decision. The integrity
+    // verdict never flips success: only a real read failure (NRC, timeout, undershoot, size
+    // mismatch) makes this return false. A dump whose bytes arrived must never be dropped.
+    output = upload.payload;
+    return upload.success;
+}
+
 std::vector<std::unique_ptr<j2534::J2534Channel>> UDSReader::openChannels()
 {
     LOG(INFO) << "UDSReader opening target ECU channel only, ecu=0x" << std::hex
@@ -93,8 +102,10 @@ void UDSReader::startImpl(std::vector<std::unique_ptr<j2534::J2534Channel>>& cha
         }
         else {
             setCurrentState(FlasherState::FallAsleep);
-            if (!common::UDSProtocolCommonSteps::broadcastProgrammingSession(channels)) {
-                setFailure("Programming-session broadcast failed", errorUpdater);
+            // Bench prelude: raise every module with the suppressed 10 82 form, then confirm with
+            // 10 02 that at least one module actually answered 50 02.
+            if (!common::UDSProtocolCommonSteps::broadcastProgrammingSessionPrelude(channels)) {
+                setFailure("No module confirmed programming session", errorUpdater);
             }
         }
 
@@ -151,13 +162,17 @@ void UDSReader::startImpl(std::vector<std::unique_ptr<j2534::J2534Channel>>& cha
         }
 
         setCurrentState(FlasherState::ReadFlash);
-        if (!common::UDSProtocolCommonSteps::readDataByUpload(channel, canId,
-                                                              _udsReaderParameters.startAddress,
-                                                              _udsReaderParameters.dataSize,
-                                                              _output,
-                                                              [this](size_t progress) {
-                                                                  incCurrentProgress(progress);
-                                                              })) {
+        const auto upload = common::UDSProtocolCommonSteps::readDataByUpload(
+            channel, canId, _udsReaderParameters.startAddress, _udsReaderParameters.dataSize,
+            [this](size_t progress) {
+                incCurrentProgress(progress);
+            });
+        _lastUploadResult = upload;
+        LOG(INFO) << "Read integrity: success=" << upload.success
+                  << " status=" << common::integrityStatusName(upload.integrityStatus)
+                  << " imageCrc=0x" << std::hex << upload.computedImageCrc
+                  << " sdaWireCrc=0x" << upload.computedSdaWireCrc;
+        if (!commitUploadResult(upload, _output)) {
             setFailure("Flash reading failed", errorUpdater);
         }
 

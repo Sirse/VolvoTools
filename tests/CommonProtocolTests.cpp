@@ -317,6 +317,32 @@ TEST(Did, KnowsVolvoSpecificIdentifiers)
     EXPECT_EQ(decodeDidValue(0xF102, {0x41, 0x42}), "41 42");
 }
 
+// ---- CRC16-CCITT-FALSE ----------------------------------------------------
+
+// The download block CRC is CRC16-CCITT-FALSE (poly 0x1021, init 0xFFFF, no reflection,
+// no xorout). The canonical check value keeps the implementation honest.
+TEST(Crc16, CanonicalCheckValue)
+{
+    const uint8_t check[] = "123456789";
+    EXPECT_EQ(crc16(check, 9), 0x29B1u);
+}
+
+// The known download fixture: the ME9 factory SBL closed its block with 77 A9 F3
+// (verified_live), and the 26 KiB payload's CRC16-CCITT-FALSE is exactly 0xA9F3. A small
+// equivalent vector below reproduces the same algorithm over a fixed byte stream.
+TEST(Crc16, DownloadFixturePinsAlgorithm)
+{
+    // The ME9 factory SBL closed its block with 77 A9 F3 (verified_live); the 26 KiB payload's
+    // CRC16-CCITT-FALSE is exactly 0xA9F3. The full payload is out-of-repo, so this synthetic
+    // stream of the same length pins the exact algorithm: a regression in the polynomial/init/
+    // reflection would break the value.
+    std::vector<uint8_t> data;
+    for (size_t i = 0; i < 26474; ++i) {
+        data.push_back(static_cast<uint8_t>((i * 13 + 11) & 0xFF));
+    }
+    EXPECT_EQ(crc16(data.data(), data.size()), 0xADE7u);
+}
+
 // ---- VBF header -----------------------------------------------------------
 
 namespace {
