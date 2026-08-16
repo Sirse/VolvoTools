@@ -13,6 +13,9 @@ PASSTHRU_MSG toPassThruMsg(uint32_t msgId, const uint8_t* Data, size_t DataSize,
     unsigned long ProtocolID, unsigned long Flags) {
     PASSTHRU_MSG result;
     memset(&result, 0, sizeof(result));
+    if (DataSize + sizeof(msgId) > sizeof(result.Data)) {
+        throw std::length_error("PASSTHRU_MSG data exceeds 4128 bytes");
+    }
     result.ProtocolID = ProtocolID;
     result.RxStatus = 0;
     result.TxFlags = Flags;
