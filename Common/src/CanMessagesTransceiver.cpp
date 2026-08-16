@@ -4,6 +4,8 @@
 
 #include <j2534/J2534Channel.hpp>
 
+#include <stdexcept>
+
 namespace common {
 
 CanMessagesTransceiver::CanMessagesTransceiver(std::unique_ptr<j2534::J2534Channel> j2534Channel,
@@ -49,10 +51,12 @@ void CanMessagesTransceiver::unsubscribeAll(const ICanMessagesReceiver& receiver
 
 void CanMessagesTransceiver::sendMessage(const std::vector<uint8_t>& data)
 {
-//    CEMCanMessages messages{{data}};
-//    const auto& passThruMsgs{messages.toPassThruMsgs(_protocolID, _txFlags)};
-//    unsigned long numMsgs = passThruMsgs.size();
-//    _j2534Channel->writeMsgs(passThruMsgs, numMsgs);
+    // This used to be a silent no-op: the body was commented out, so any caller got the
+    // impression a frame was sent when nothing hit the bus. There is no CAN id to target and
+    // the old CEMCanMessages type no longer exists, so a working implementation cannot be
+    // guessed. Fail loudly instead of silently dropping frames.
+    (void)data;
+    throw std::logic_error("CanMessagesTransceiver::sendMessage is not implemented");
 }
 
 void CanMessagesTransceiver::runRead(bool enabled)
