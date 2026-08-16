@@ -5,6 +5,7 @@
 #include "OutputFormat.hpp"
 
 #include <common/J2534ChannelProvider.hpp>
+#include <common/Gateway.hpp>
 #include <common/Util.hpp>
 #include <common/protocols/UDSDid.hpp>
 #include <common/protocols/UDSDtc.hpp>
@@ -1173,11 +1174,11 @@ void runRoutine(const std::vector<j2534::DeviceInfo>& devices, const RunOptions&
 
     runReported("routine", ecuLabel, request, [&]() {
         const auto payload = udsPayload(processUds(*channel, canId, request, options.timeoutMs));
-        if (payload.size() < 4
-            || payload[0] != byte(common::uds::PositiveResponseId::RoutineControl)
-            || payload[1] != options.routineSubFunction
-            || payload[2] != routineHigh
-            || payload[3] != routineLow) {
+        try {
+            common::validateRoutineControlResponse(payload, options.routineSubFunction == 0x01,
+                                                   options.routineId);
+        }
+        catch (const std::exception&) {
             throw DiagError(ExitCode::ValidationError,
                 "Unexpected RoutineControl response: " + formatBytes(payload));
         }

@@ -1175,6 +1175,11 @@ namespace {
         return EncryptionType::None;
     }
 
+    static bool getFlag(const YAML::Node& node, const std::string& tag)
+    {
+        return node[tag].IsDefined() && node[tag].as<uint32_t>(0) != 0;
+    }
+
     static ECUInfo processEcuNode(const YAML::Node& node)
     {
         ECUInfo ecuInfo;
@@ -1183,7 +1188,23 @@ namespace {
         ecuInfo.canId = std::stoi(getNonEmptyHexIntString(node["CANIdentifier"].as<std::string>("")), 0, 16);
         ecuInfo.compressionType = getEcuCompression(node);
         ecuInfo.encryptionType = getEcuEncryption(node);
+        ecuInfo.sblInPBL = getFlag(node, "SBLInPBL");
+        ecuInfo.swdlIssue = getFlag(node, "SwdlIssue");
+        ecuInfo.masterEcu = getFlag(node, "MasterECU");
         return ecuInfo;
+    }
+
+    static GatewayEndpoint processEndpointNode(const YAML::Node& node, const std::string& tag)
+    {
+        GatewayEndpoint endpoint;
+        if (!node[tag].IsDefined()) {
+            return endpoint;
+        }
+        const auto& entry = node[tag];
+        endpoint.ecuAddress = std::stoi(getNonEmptyHexIntString(entry["ECUAddress"].as<std::string>("")), 0, 16);
+        endpoint.canId = std::stoi(getNonEmptyHexIntString(entry["CANIdentifier"].as<std::string>("")), 0, 16);
+        endpoint.name = entry["Name"].as<std::string>("");
+        return endpoint;
     }
 
     static uint32_t getCanProtocol(const std::string& input)
@@ -1204,11 +1225,15 @@ namespace {
         for (const auto& confNode : confNodes) {
             ConfigurationInfo info;
             info.name = confNode["Name"].as<std::string>();
+            info.gatewaySubTester = processEndpointNode(confNode, "Gateway_SubTester");
+            info.subTester = processEndpointNode(confNode, "SubTester");
             for (const auto& bus : confNode["Bus"]) {
                 BusConfiguration busConf;
                 busConf.baudrate = bus["BaudRate"].as<uint32_t>() * 1000;
                 busConf.canIdBitSize = bus["CANIdBitSize"].as<uint32_t>();
                 busConf.samplePoint = bus["SamplePoint"].as<uint32_t>(0);
+                busConf.p4CanMax = bus["P4CANMax"].as<uint32_t>(0);
+                busConf.swdlSpecification = bus["SWDLSpecification"].as<uint32_t>(0);
                 busConf.protocolId = getCanProtocol(bus["SWDLProtocol"].as<std::string>());
                 busConf.name = bus["Name"].as<std::string>();
                 const auto& nodes = bus["Node"];

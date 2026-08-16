@@ -1,10 +1,13 @@
 #include <common/Util.hpp>
 #include <common/VBFParser.hpp>
+#include <common/CommonData.hpp>
+#include <common/Gateway.hpp>
 #include <common/protocols/UDSDid.hpp>
 #include <common/protocols/UDSDtc.hpp>
 
 #include <gtest/gtest.h>
 
+#include <fstream>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -162,6 +165,141 @@ TEST(BusConfig, SamplePointComesFromConfiguration)
     EXPECT_EQ(busByName(p2, "CAN MS").samplePoint, 68u);
 }
 
+// ---- previously ignored vehicle-configuration fields -----------------------
+
+// The vehicle configuration carries P4CANMax and SWDLSpecification on every bus. They were
+// present in data.yaml but never read; the response-pending budget was hardcoded instead.
+TEST(BusConfig, P4CanMaxAndSwdlSpecificationComeFromConfiguration)
+{
+    const auto p3 = getConfigurationInfoByCarPlatform(CarPlatform::P3);
+    EXPECT_EQ(busByName(p3, "CAN HS").p4CanMax, 300000u);
+    EXPECT_EQ(busByName(p3, "CAN HS").swdlSpecification, 31808456u);
+}
+
+// SBLInPBL / SwdlIssue / MasterECU are per-ECU flags in the configuration.
+TEST(EcuConfig, PerEcuFlagsComeFromConfiguration)
+{
+    const auto configs = loadConfiguration(R"(
+Configuration:
+  - 
+    Name: TEST
+    Bus:
+      - 
+        BaudRate: 500
+        CANIdBitSize: 11
+        Name: CAN HS
+        SWDLProtocol: 15765-2
+        Node:
+          - 
+            Address: '10'
+            CANIdentifier: '7E0'
+            Name: ECM - Engine Control Module
+            SBLInPBL: 1
+          - 
+            Address: '50'
+            CANIdentifier: '7B0'
+            Name: CEM - Central Electronic Module
+            MasterECU: 1
+            SwdlIssue: 1
+          - 
+            Address: '18'
+            CANIdentifier: '7E1'
+            Name: TCM - Transmission Control Module
+)");
+    ASSERT_EQ(configs.size(), 1u);
+    ASSERT_EQ(configs[0].busInfo.size(), 1u);
+    const auto& ecuInfo = configs[0].busInfo[0].ecuInfo;
+    ASSERT_EQ(ecuInfo.size(), 3u);
+
+    EXPECT_TRUE(ecuInfo[0].sblInPBL);
+    EXPECT_FALSE(ecuInfo[0].masterEcu);
+    EXPECT_FALSE(ecuInfo[0].swdlIssue);
+
+    EXPECT_TRUE(ecuInfo[1].masterEcu);
+    EXPECT_TRUE(ecuInfo[1].swdlIssue);
+    EXPECT_FALSE(ecuInfo[1].sblInPBL);
+
+    EXPECT_FALSE(ecuInfo[2].sblInPBL);
+    EXPECT_FALSE(ecuInfo[2].masterEcu);
+}
+
+// Gateway_SubTester / SubTester live at the Configuration level next to Bus and Name.
+TEST(Config, GatewayAndSubTesterEndpoints)
+{
+    const auto configs = loadConfiguration(R"(
+Configuration:
+  - 
+    Name: TEST
+    Gateway_SubTester:
+      CANIdentifier: 784
+      ECUAddress: 61
+      Name: ICM - Infotainment Control Module
+    SubTester:
+      CANIdentifier: 784
+      ECUAddress: 80
+      Name: IAM - Integrated Audio Module
+    Bus:
+      - 
+        BaudRate: 500
+        CANIdBitSize: 11
+        Name: CAN HS
+        SWDLProtocol: 15765-2
+)");
+    ASSERT_EQ(configs.size(), 1u);
+    EXPECT_EQ(configs[0].gatewaySubTester.ecuAddress, 0x61u);
+    EXPECT_EQ(configs[0].gatewaySubTester.canId, 0x784u);
+    EXPECT_EQ(configs[0].gatewaySubTester.name, "ICM - Infotainment Control Module");
+    EXPECT_EQ(configs[0].subTester.ecuAddress, 0x80u);
+    EXPECT_EQ(configs[0].subTester.canId, 0x784u);
+}
+
+// A configuration with no endpoint entries leaves them as "not set".
+TEST(Config, MissingEndpointsAreUnset)
+{
+    const auto configs = loadConfiguration(R"(
+Configuration:
+  - 
+    Name: TEST
+    Bus:
+      - 
+        BaudRate: 500
+        CANIdBitSize: 11
+        Name: CAN HS
+        SWDLProtocol: 15765-2
+)");
+    ASSERT_EQ(configs.size(), 1u);
+    EXPECT_EQ(configs[0].gatewaySubTester.ecuAddress, 0u);
+    EXPECT_EQ(configs[0].gatewaySubTester.canId, 0u);
+    EXPECT_TRUE(configs[0].gatewaySubTester.name.empty());
+    EXPECT_EQ(configs[0].subTester.ecuAddress, 0u);
+}
+
+// The embedded configuration must stay identical to the checked-in data.yaml: data.yaml is the
+// single source of truth and CommonData.cpp is generated from it at configure time. A divergence
+// here means someone hand-edited one without the other.
+TEST(Config, EmbeddedConfigurationMatchesDataYaml)
+{
+    std::ifstream yaml(VOLVOTOOLS_DATA_YAML, std::ios::binary);
+    ASSERT_TRUE(yaml.good()) << "can't open data.yaml at " << VOLVOTOOLS_DATA_YAML;
+    std::string onDisk((std::istreambuf_iterator<char>(yaml)), std::istreambuf_iterator<char>());
+    ASSERT_FALSE(onDisk.empty());
+
+    // The embedded string was generated from data.yaml as-is; only line endings may differ
+    // depending on how the file is checked out. Compare after normalising CRLF to LF.
+    auto normalize = [](const std::string& text) {
+        std::string result;
+        result.reserve(text.size());
+        for (size_t i = 0; i < text.size(); ++i) {
+            if (text[i] == '\r' && i + 1 < text.size() && text[i + 1] == '\n') {
+                continue;
+            }
+            result.push_back(text[i]);
+        }
+        return result;
+    };
+    EXPECT_EQ(normalize(CommonData::commonConfiguration), normalize(onDisk));
+}
+
 // Volvo's own identifiers, taken from the factory tooling's published interface. They used to
 // fall through to the "DID 0x...." placeholder.
 TEST(Did, KnowsVolvoSpecificIdentifiers)
@@ -263,4 +401,79 @@ TEST(VbfHeader, KnownEntriesStillWinOverCatchAll)
     ASSERT_EQ(header.eraseBlocks.size(), 1u);
     EXPECT_EQ(header.eraseBlocks[0].startAddr, 0x8000u);
     EXPECT_EQ(header.eraseBlocks[0].length, 0x1000u);
+}
+
+// ---- gateway route + GSA codec --------------------------------------------
+
+TEST(GatewayRoute, ResolvesFromConfiguration)
+{
+    const auto configs = loadConfiguration(R"(
+Configuration:
+  - 
+    Name: TEST
+    Gateway_SubTester:
+      CANIdentifier: 784
+      ECUAddress: 61
+      Name: ICM - Infotainment Control Module
+    Bus:
+      - 
+        BaudRate: 500
+        CANIdBitSize: 11
+        Name: CAN HS
+        SWDLProtocol: 15765-2
+)");
+    ASSERT_EQ(configs.size(), 1u);
+    GatewayRoute route;
+    ASSERT_TRUE(resolveGatewayRoute(configs[0], 0x10, route));
+    EXPECT_EQ(route.endpoint.ecuAddress, 0x61u);
+    EXPECT_EQ(route.endpoint.canId, 0x784u);
+}
+
+// Configurations without a gateway endpoint (P1/P2 world) resolve to no route.
+TEST(GatewayRoute, AbsentEndpointMeansNoRoute)
+{
+    const auto configs = loadConfiguration(R"(
+Configuration:
+  - 
+    Name: TEST
+    Bus:
+      - 
+        BaudRate: 500
+        CANIdBitSize: 11
+        Name: CAN HS
+        SWDLProtocol: 15765-2
+)");
+    GatewayRoute route;
+    EXPECT_FALSE(resolveGatewayRoute(configs[0], 0x10, route));
+}
+
+// The GSA RID is only a hypothesis, so the codec builds 31 01/31 02 with the explicit id and
+// raw option bytes; it does not hardcode 0x0300.
+TEST(GsaCodec, BuildsStartAndStopRequests)
+{
+    const auto start = sdaRoutineRequest(true, 0x0300, { 0x02, 0x01, 0x50 });
+    EXPECT_EQ(start, (std::vector<uint8_t>{ 0x31, 0x01, 0x03, 0x00, 0x02, 0x01, 0x50 }));
+
+    const auto stop = sdaRoutineRequest(false, 0x0300, {});
+    EXPECT_EQ(stop, (std::vector<uint8_t>{ 0x31, 0x02, 0x03, 0x00 }));
+}
+
+TEST(GsaCodec, ValidatesPositiveResponse)
+{
+    EXPECT_NO_THROW(validateRoutineControlResponse(
+        { 0x71, 0x01, 0x03, 0x00 }, true, 0x0300));
+    EXPECT_NO_THROW(validateRoutineControlResponse(
+        { 0x71, 0x02, 0x03, 0x00 }, false, 0x0300));
+    EXPECT_THROW(validateRoutineControlResponse({ 0x71, 0x02, 0x03, 0x00 }, true, 0x0300),
+                 std::exception);
+    EXPECT_THROW(validateRoutineControlResponse({ 0x71, 0x01, 0x03, 0x01 }, true, 0x0300),
+                 std::exception);
+    EXPECT_THROW(validateRoutineControlResponse({ 0x62, 0x01, 0x03, 0x00 }, true, 0x0300),
+                 std::exception);
+}
+
+TEST(GsaCodec, RoutineNames)
+{
+    EXPECT_EQ(sdaRoutineName(SdaRoutine::ActivateSBL), "ActivateSBL");
+    EXPECT_EQ(sdaRoutineName(SdaRoutine::GatewayStateAccess), "GatewayStateAccess");
 }
