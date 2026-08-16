@@ -10,9 +10,27 @@ aux_source_directory(${CMAKE_CURRENT_SOURCE_DIR}/src/protocols SUB_SOURCES)
 aux_source_directory(${CMAKE_CURRENT_SOURCE_DIR}/src/encryption SUB_SOURCES)
 aux_source_directory(${CMAKE_CURRENT_SOURCE_DIR}/src/compression SUB_SOURCES)
 
+# The vehicle configuration ships as common/data.yaml. CommonData.cpp used to be a hand-maintained
+# hex blob of the same file, which let the two drift apart (data.yaml itself is not part of any
+# CMake target). Regenerate CommonData.cpp from data.yaml as a build step: add_custom_command gives
+# the generated file a real dependency on data.yaml and the generator script, so an edit to the YAML
+# re-runs the generator on the next cmake --build instead of silently keeping a stale configuration.
+set(COMMON_CONFIG_YAML ${CMAKE_CURRENT_SOURCE_DIR}/common/data.yaml)
+set(COMMON_DATA_GENERATOR ${CMAKE_CURRENT_SOURCE_DIR}/tools/generate_common_data.py)
+set(COMMON_DATA_GENERATED ${CMAKE_CURRENT_BINARY_DIR}/generated/CommonData.cpp)
+find_package(Python3 REQUIRED)
+add_custom_command(
+    OUTPUT ${COMMON_DATA_GENERATED}
+    COMMAND ${Python3_EXECUTABLE} ${COMMON_DATA_GENERATOR} ${COMMON_CONFIG_YAML} ${COMMON_DATA_GENERATED}
+    DEPENDS ${COMMON_DATA_GENERATOR} ${COMMON_CONFIG_YAML}
+    COMMENT "Generating CommonData.cpp from data.yaml"
+    VERBATIM
+)
+
 set(SOURCE
   ${SOURCE}
   ${CMAKE_CURRENT_SOURCE_DIR}/src/CliSupport.cpp
+  ${COMMON_DATA_GENERATED}
   ${SUB_SOURCES}
 )
 list(REMOVE_DUPLICATES SOURCE)
