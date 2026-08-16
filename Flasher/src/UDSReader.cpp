@@ -85,16 +85,16 @@ void UDSReader::startImpl(std::vector<std::unique_ptr<j2534::J2534Channel>>& cha
 
         if (_udsReaderParameters.attachRunningSbl) {
             setCurrentState(FlasherState::FallAsleep);
-            LOG(INFO) << "Attaching to already running UDS SBL, skipping fallAsleep/load/start";
+            LOG(INFO) << "Attaching to already running UDS SBL, skipping programming-session broadcast/load/start";
         }
         else if (_udsReaderParameters.skipFallAsleep) {
             setCurrentState(FlasherState::FallAsleep);
-            LOG(INFO) << "Fall asleep skipped, vehicle programming mode was prepared by CEM";
+            LOG(INFO) << "Programming-session broadcast skipped, vehicle programming mode was prepared by CEM";
         }
         else {
             setCurrentState(FlasherState::FallAsleep);
-            if (!common::UDSProtocolCommonSteps::fallAsleep(channels)) {
-                setFailure("Fall asleep failed", errorUpdater);
+            if (!common::UDSProtocolCommonSteps::broadcastProgrammingSession(channels)) {
+                setFailure("Programming-session broadcast failed", errorUpdater);
             }
         }
 
@@ -104,7 +104,7 @@ void UDSReader::startImpl(std::vector<std::unique_ptr<j2534::J2534Channel>>& cha
         if (_udsReaderParameters.attachRunningSbl) {
             // A resident/read SBL usually does not implement 0x27, and attaching means it is
             // already up. Only re-authorize when a PIN was actually given and --no-sbl-auth
-            // was not set; otherwise a doomed 27 01 just fails and triggers wakeUp cleanup.
+            // was not set; otherwise a doomed 27 01 just fails and triggers the ECUReset cleanup.
             if (_udsReaderParameters.noSblAuth || !hasSecurityPin(_udsReaderParameters.pin)) {
                 LOG(INFO) << "Skipping running-SBL SecurityAccess ("
                           << (_udsReaderParameters.noSblAuth ? "--no-sbl-auth" : "no PIN provided")
@@ -162,7 +162,7 @@ void UDSReader::startImpl(std::vector<std::unique_ptr<j2534::J2534Channel>>& cha
         }
 
         setCurrentState(FlasherState::WakeUp);
-        common::UDSProtocolCommonSteps::wakeUp(channels);
+        common::UDSProtocolCommonSteps::broadcastEcuReset(channels);
         setCurrentState(FlasherState::Done);
     }
     catch (const std::exception& ex) {
@@ -172,7 +172,7 @@ void UDSReader::startImpl(std::vector<std::unique_ptr<j2534::J2534Channel>>& cha
         LOG(WARNING) << "UDSReader failed after SBL workflow";
         if (getCurrentState() != FlasherState::WakeUp) {
             setCurrentState(FlasherState::WakeUp);
-            common::UDSProtocolCommonSteps::wakeUp(channels);
+            common::UDSProtocolCommonSteps::broadcastEcuReset(channels);
         }
         setCurrentState(FlasherState::Error);
         throw;
@@ -184,7 +184,7 @@ void UDSReader::startImpl(std::vector<std::unique_ptr<j2534::J2534Channel>>& cha
         LOG(WARNING) << "UDSReader failed after SBL workflow";
         if (getCurrentState() != FlasherState::WakeUp) {
             setCurrentState(FlasherState::WakeUp);
-            common::UDSProtocolCommonSteps::wakeUp(channels);
+            common::UDSProtocolCommonSteps::broadcastEcuReset(channels);
         }
         setCurrentState(FlasherState::Error);
         throw;

@@ -71,7 +71,7 @@ namespace common {
         void fallAsleep()
         {
             setCurrentState(UDSPinFinder::State::FallAsleep);
-            if (!common::UDSProtocolCommonSteps::fallAsleep(_channels)) {
+            if (!common::UDSProtocolCommonSteps::broadcastProgrammingSession(_channels)) {
                 setFailed();
             }
         }
@@ -101,7 +101,7 @@ namespace common {
         void wakeUp()
         {
             setCurrentState(UDSPinFinder::State::WakeUp);
-            common::UDSProtocolCommonSteps::wakeUp(_channels);
+            common::UDSProtocolCommonSteps::broadcastEcuReset(_channels);
         }
 
         void done()

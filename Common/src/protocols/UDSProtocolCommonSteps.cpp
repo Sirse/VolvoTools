@@ -124,9 +124,9 @@ namespace common {
         return result;
 	}
 
-	bool UDSProtocolCommonSteps::fallAsleep(const std::vector<std::unique_ptr<j2534::J2534Channel>>& channels)
+	bool UDSProtocolCommonSteps::broadcastProgrammingSession(const std::vector<std::unique_ptr<j2534::J2534Channel>>& channels)
 	{
-        LOG(INFO) << "fallAsleep enter";
+        LOG(INFO) << "broadcastProgrammingSession enter";
         std::vector<std::vector<unsigned long>> msgIds(channels.size());
 		for (size_t i = 0; i < channels.size(); ++i) {
 			const auto ids = channels[i]->startPeriodicMsgs(UDSMessage(0x7DF, { 0x10, 0x02 }), 5);
@@ -139,7 +139,7 @@ namespace common {
 		for (size_t i = 0; i < channels.size(); ++i) {
 			channels[i]->stopPeriodicMsg(msgIds[i]);
 		}
-        LOG(INFO) << "fallAsleep exit";
+        LOG(INFO) << "broadcastProgrammingSession exit";
         return true;
 	}
 
@@ -148,12 +148,12 @@ namespace common {
 		return channel.startPeriodicMsgs(UDSMessage(0x7DF, { 0x3E, 0x80 }), 1900);
 	}
 
-	bool UDSProtocolCommonSteps::broadcastProgrammingMode(
+	bool UDSProtocolCommonSteps::broadcastProgrammingSessionSilent(
 		const std::vector<std::unique_ptr<j2534::J2534Channel>>& channels, unsigned long durationMs)
 	{
-        LOG(INFO) << "broadcastProgrammingMode enter";
+        LOG(INFO) << "broadcastProgrammingSessionSilent enter";
         if (channels.empty()) {
-            LOG(ERROR) << "broadcastProgrammingMode failed: no open channels";
+            LOG(ERROR) << "broadcastProgrammingSessionSilent failed: no open channels";
             return false;
         }
         std::vector<std::vector<unsigned long>> msgIds(channels.size());
@@ -161,7 +161,7 @@ namespace common {
         for (size_t i = 0; i < channels.size(); ++i) {
             msgIds[i] = channels[i]->startPeriodicMsgs(UDSMessage(0x7DF, { 0x10, 0x82 }), 20);
             if (msgIds[i].empty()) {
-                LOG(ERROR) << "broadcastProgrammingMode failed to start periodic message on channel " << i;
+                LOG(ERROR) << "broadcastProgrammingSessionSilent failed to start periodic message on channel " << i;
                 success = false;
             }
         }
@@ -171,19 +171,19 @@ namespace common {
                 channels[i]->stopPeriodicMsg(msgIds[i]);
             }
         }
-        LOG(INFO) << "broadcastProgrammingMode exit";
+        LOG(INFO) << "broadcastProgrammingSessionSilent exit";
         return success;
 	}
 
-	void UDSProtocolCommonSteps::wakeUp(const std::vector<std::unique_ptr<j2534::J2534Channel>>& channels)
+	void UDSProtocolCommonSteps::broadcastEcuReset(const std::vector<std::unique_ptr<j2534::J2534Channel>>& channels)
 	{
-        LOG(INFO) << "wakeUp enter";
-        for(const auto& idToWakeUp: {0x11, 0x81}) {
+        LOG(INFO) << "broadcastEcuReset enter";
+        for(const auto& resetSubfunction: {0x11, 0x81}) {
             std::vector<std::vector<unsigned long>> msgIds(channels.size());
             for (size_t i = 0; i < channels.size(); ++i) {
-                const auto ids = channels[i]->startPeriodicMsgs(UDSMessage(0x7DF, { 0x11, static_cast<uint8_t>(idToWakeUp) }), 20);
+                const auto ids = channels[i]->startPeriodicMsgs(UDSMessage(0x7DF, { 0x11, static_cast<uint8_t>(resetSubfunction) }), 20);
                 if (ids.empty()) {
-                    LOG(ERROR) << "wakeUp error, failed to start periodic messages on channel = " << i;
+                    LOG(ERROR) << "broadcastEcuReset error, failed to start periodic messages on channel = " << i;
                     return;
                 }
                 msgIds[i] = ids;
@@ -193,7 +193,7 @@ namespace common {
                 channels[i]->stopPeriodicMsg(msgIds[i]);
             }
         }
-        LOG(INFO) << "wakeUp exit";
+        LOG(INFO) << "broadcastEcuReset exit";
         return;
 	}
 

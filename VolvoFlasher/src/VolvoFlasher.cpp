@@ -188,7 +188,7 @@ bool getRunOptions(int argc, const char* argv[], std::string& deviceName,
 	flash_command.add_argument("--program-mode").required()
 		.help("Programming mode handling, required: vehicle or bench");
 	flash_command.add_argument("--attach-running-sbl").default_value(false).implicit_value(true).nargs(0)
-		.help("Flash through an already running RAM SBL; skips fallAsleep/authorize/load/start");
+		.help("Flash through an already running RAM SBL; skips the programming-session broadcast, the pre-load authorize, and SBL load/start");
 
 	argparse::ArgumentParser read_command("read", "1.0", argparse::default_arguments::help);
     addDebugArgument(read_command);
@@ -201,7 +201,7 @@ bool getRunOptions(int argc, const char* argv[], std::string& deviceName,
 	read_command.add_argument("--program-mode").default_value(std::string{ "bench" })
 		.help("Programming mode handling for UDS reading: vehicle or bench");
 	read_command.add_argument("--attach-running-sbl").default_value(false).implicit_value(true).nargs(0)
-		.help("Read through an already running RAM SBL; skips fallAsleep/authorize/load/start");
+		.help("Read through an already running RAM SBL; skips the programming-session broadcast and SBL load/start");
 	read_command.add_argument("--no-sbl-auth").default_value(false).implicit_value(true).nargs(0)
 		.help("Skip SecurityAccess (27 01) against the SBL; use with a resident/read SBL that does not implement it");
 
@@ -242,7 +242,7 @@ bool getRunOptions(int argc, const char* argv[], std::string& deviceName,
 	uds_raw_command.add_argument("--program-mode").default_value(std::string{ "bench" })
 		.help("Programming mode handling when --sbl is used: vehicle or bench");
 	uds_raw_command.add_argument("--no-wakeup").default_value(false).implicit_value(true).nargs(0)
-		.help("Do not send wakeUp/reset cleanup after --sbl raw session");
+		.help("Do not send the functional ECUReset cleanup after --sbl raw session");
 	uds_raw_command.add_argument("--wake").default_value(false).implicit_value(true).nargs(0)
 		.help("Send a functional wake burst (7DF 10 82) on the ECU bus before the raw request(s)");
 	uds_raw_command.add_argument("--session").default_value(std::string{ "none" })
@@ -749,7 +749,7 @@ void findPin2(j2534::J2534& j2534, common::CarPlatform carPlatform, uint8_t ecuI
 	common::UDSPinFinder pinFinder(j2534, carPlatform, ecuId, [&savedTime, &savedPin](common::UDSPinFinder::State state, uint64_t currentPin) {
 		switch (state) {
 		case common::UDSPinFinder::State::FallAsleep:
-			std::cout << "Fall asleep" << std::endl;
+			std::cout << "Programming session broadcast" << std::endl;
 			break;
 		case common::UDSPinFinder::State::KeepAlive:
 			std::cout << "Start keep alive" << std::endl;
@@ -1162,9 +1162,9 @@ void UDSRaw(common::CarPlatform carPlatform, uint8_t ecuId, j2534::J2534& j2534,
 			<< " programMode=" << programModeToString(programMode)
 			<< " noWakeup=" << noWakeup;
 		if (skipFallAsleep) {
-			LOG(INFO) << "Fall asleep skipped, vehicle programming mode was prepared by CEM";
+			LOG(INFO) << "Programming-session broadcast skipped, vehicle programming mode was prepared by CEM";
 		}
-		else if (!common::UDSProtocolCommonSteps::fallAsleep(channels)) {
+		else if (!common::UDSProtocolCommonSteps::broadcastProgrammingSession(channels)) {
 			throw std::runtime_error("SBL fall asleep failed");
 		}
 		common::UDSProtocolCommonSteps::keepAlive(channel);
@@ -1219,12 +1219,12 @@ void UDSRaw(common::CarPlatform carPlatform, uint8_t ecuId, j2534::J2534& j2534,
 	}
 	catch (...) {
 		if (!sblPath.empty() && !noWakeup) {
-			common::UDSProtocolCommonSteps::wakeUp(channels);
+			common::UDSProtocolCommonSteps::broadcastEcuReset(channels);
 		}
 		throw;
 	}
 	if (!sblPath.empty() && !noWakeup) {
-		common::UDSProtocolCommonSteps::wakeUp(channels);
+		common::UDSProtocolCommonSteps::broadcastEcuReset(channels);
 	}
 }
 
@@ -1264,7 +1264,7 @@ void UDSWakeup(common::CarPlatform carPlatform, uint8_t ecuId, j2534::J2534& j25
 	if (channels.empty()) {
 		throw std::runtime_error("Failed to open J2534 UDS channels");
 	}
-	common::UDSProtocolCommonSteps::wakeUp(channels);
+	common::UDSProtocolCommonSteps::broadcastEcuReset(channels);
 	std::cout << "Wakeup frames sent" << std::endl;
 }
 

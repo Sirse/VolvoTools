@@ -52,15 +52,15 @@ namespace flasher {
         {
             _stateUpdater(FlasherState::FallAsleep);
             if (_udsFlasherParameters.attachRunningSbl) {
-                LOG(INFO) << "Attaching to already running UDS SBL, skipping fallAsleep";
+                LOG(INFO) << "Attaching to already running UDS SBL, skipping programming-session broadcast";
                 return;
             }
             if (_udsFlasherParameters.skipFallAsleep) {
-                LOG(INFO) << "Fall asleep skipped, vehicle programming mode was prepared by CEM";
+                LOG(INFO) << "Programming-session broadcast skipped, vehicle programming mode was prepared by CEM";
                 return;
             }
-            if (!common::UDSProtocolCommonSteps::fallAsleep(_channels)) {
-                setFailed("Fall asleep failed");
+            if (!common::UDSProtocolCommonSteps::broadcastProgrammingSession(_channels)) {
+                setFailed("Programming-session broadcast failed");
             }
         }
 
@@ -189,7 +189,7 @@ namespace flasher {
         void wakeUp()
         {
             _stateUpdater(FlasherState::WakeUp);
-            common::UDSProtocolCommonSteps::wakeUp(_channels);
+            common::UDSProtocolCommonSteps::broadcastEcuReset(_channels);
         }
 
         void closeChannels()
