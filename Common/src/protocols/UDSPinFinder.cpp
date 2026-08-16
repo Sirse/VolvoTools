@@ -71,7 +71,8 @@ namespace common {
         void fallAsleep()
         {
             setCurrentState(UDSPinFinder::State::FallAsleep);
-            if (!common::UDSProtocolCommonSteps::broadcastProgrammingSession(_channels)) {
+            // Bench prelude: raise with the suppressed 10 82 form, then confirm 10 02 was answered.
+            if (!common::UDSProtocolCommonSteps::broadcastProgrammingSessionPrelude(_channels)) {
                 setFailed();
             }
         }

@@ -46,6 +46,29 @@ namespace common {
             return toHexString({pin[0], pin[1], pin[2], pin[3], pin[4]});
         }
 
+        // Reads the channel for a short window and reports whether a positive DiagnosticSessionControl
+        // response (50 02) arrived. The periodic broadcast already queued the responses; this just drains
+        // the buffer and confirms the module actually came up. A timeout or empty read is "no confirmation",
+        // not an error - the caller decides what that means.
+        bool sawProgrammingSessionResponse(const j2534::J2534Channel& channel)
+        {
+            bool sawPositive = false;
+            try {
+                channel.readMsgs([&sawPositive](const uint8_t* data, size_t dataSize) {
+                    // 4-byte CAN id header + payload; positive 50 02 for request 10 02.
+                    if (dataSize >= 6 && data[4] == 0x50 && data[5] == 0x02) {
+                        sawPositive = true;
+                        return false;
+                    }
+                    return true;
+                }, 300);
+            }
+            catch (const std::exception& ex) {
+                LOG(DEBUG) << "sawProgrammingSessionResponse read ended: " << ex.what();
+            }
+            return sawPositive;
+        }
+
         bool rangesOverlap(uint32_t firstAddr, uint32_t firstSize, uint32_t secondAddr, uint32_t secondSize)
         {
             if (firstSize == 0 || secondSize == 0) {
@@ -113,24 +136,20 @@ namespace common {
 
 	}
 
-	std::vector<std::unique_ptr<j2534::J2534Channel>> UDSProtocolCommonSteps::openChannels(
-		j2534::J2534& j2534, unsigned long baudrate, uint32_t canId)
-    {
-        LOG(INFO) << "openChannels enter";
-        std::vector<std::unique_ptr<j2534::J2534Channel>> result;
-		result.emplace_back(openUDSChannel(j2534, baudrate, canId));
-		result.emplace_back(openLowSpeedChannel(j2534, CAN_ID_BOTH));
-        LOG(INFO) << "openChannels exit";
-        return result;
-	}
-
 	bool UDSProtocolCommonSteps::broadcastProgrammingSession(const std::vector<std::unique_ptr<j2534::J2534Channel>>& channels)
 	{
         LOG(INFO) << "broadcastProgrammingSession enter";
+        if (channels.empty()) {
+            LOG(ERROR) << "broadcastProgrammingSession failed: no open channels";
+            return false;
+        }
         std::vector<std::vector<unsigned long>> msgIds(channels.size());
 		for (size_t i = 0; i < channels.size(); ++i) {
-			const auto ids = channels[i]->startPeriodicMsgs(UDSMessage(0x7DF, { 0x10, 0x02 }), 5);
+            // 5 ms used to be used here, but SDA itself logs "StartPeriodicSend with a
+            // TimeInterval<10! Not supported" on DiCE and other adapters may reject it too.
+			const auto ids = channels[i]->startPeriodicMsgs(UDSMessage(0x7DF, { 0x10, 0x02 }), 20);
 			if (ids.empty()) {
+                LOG(ERROR) << "broadcastProgrammingSession failed to start periodic message on channel " << i;
 				return false;
 			}
 			msgIds[i] = ids;
@@ -139,8 +158,17 @@ namespace common {
 		for (size_t i = 0; i < channels.size(); ++i) {
 			channels[i]->stopPeriodicMsg(msgIds[i]);
 		}
-        LOG(INFO) << "broadcastProgrammingSession exit";
-        return true;
+        // A periodic-message start alone used to count as success. The ECU must actually have
+        // answered 50 02: a sleeping/off module answers nothing, and reporting success then
+        // left the real failure to surface later as a mysterious authorize/transfer timeout.
+        for (size_t i = 0; i < channels.size(); ++i) {
+            if (sawProgrammingSessionResponse(*channels[i])) {
+                LOG(INFO) << "broadcastProgrammingSession confirmed programming session on channel " << i;
+                return true;
+            }
+        }
+        LOG(ERROR) << "broadcastProgrammingSession no module confirmed programming session (50 02)";
+        return false;
 	}
 
 	std::vector<unsigned long> UDSProtocolCommonSteps::keepAlive(const j2534::J2534Channel& channel)
@@ -173,6 +201,15 @@ namespace common {
         }
         LOG(INFO) << "broadcastProgrammingSessionSilent exit";
         return success;
+	}
+
+	bool UDSProtocolCommonSteps::broadcastProgrammingSessionPrelude(
+		const std::vector<std::unique_ptr<j2534::J2534Channel>>& channels)
+	{
+        if (!broadcastProgrammingSessionSilent(channels)) {
+            return false;
+        }
+        return broadcastProgrammingSession(channels);
 	}
 
 	void UDSProtocolCommonSteps::broadcastEcuReset(const std::vector<std::unique_ptr<j2534::J2534Channel>>& channels)

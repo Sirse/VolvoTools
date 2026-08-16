@@ -59,8 +59,11 @@ namespace flasher {
                 LOG(INFO) << "Programming-session broadcast skipped, vehicle programming mode was prepared by CEM";
                 return;
             }
-            if (!common::UDSProtocolCommonSteps::broadcastProgrammingSession(_channels)) {
-                setFailed("Programming-session broadcast failed");
+            // Bench prelude: raise every module with the suppressed 10 82 form, then confirm
+            // with 10 02 that a module actually answered 50 02. The old code only sent 10 02 and
+            // treated a successful periodic-message start as success even if nothing came up.
+            if (!common::UDSProtocolCommonSteps::broadcastProgrammingSessionPrelude(_channels)) {
+                setFailed("No module confirmed programming session");
             }
         }
 
