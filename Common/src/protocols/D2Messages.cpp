@@ -2,6 +2,8 @@
 
 #include <algorithm>
 #include <iterator>
+#include <stdexcept>
+#include <string>
 
 namespace common {
 
@@ -73,6 +75,12 @@ D2Messages::createWriteDataMsgs(uint8_t ecuId,
 D2Messages::createWriteDataMsgs(uint8_t ecuId,
                                 const std::vector<uint8_t> &bin,
                                 size_t beginOffset, size_t endOffset) {
+  if (beginOffset > endOffset || endOffset > bin.size()) {
+    throw std::out_of_range("D2Messages::createWriteDataMsgs: invalid range [" +
+                            std::to_string(beginOffset) + ", " +
+                            std::to_string(endOffset) + ") over " +
+                            std::to_string(bin.size()) + " bytes");
+  }
   const auto MaxMessagesPerMessage = 10;
   std::vector<D2Message> result;
   std::vector<D2Message::DataType> resultPayload;

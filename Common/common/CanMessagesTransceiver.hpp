@@ -26,6 +26,19 @@ public:
     virtual bool onCanMessage(const uint8_t* buffer, size_t bufferSize) = 0;
 };
 
+// Per-ECU assembly state and subscriber map, shared by CanMessagesTransceiver and the pure
+// frame-processing function. Exposed so the packet assembly logic can be unit-tested without a
+// J2534 device.
+using ReceivedMessageMap = std::map<uint8_t, std::vector<uint8_t>>;
+using SubscriberMap = std::multimap<uint8_t, ICanMessagesReceiver*>;
+
+// Processes one received D2 frame: updates the per-ECU assembly buffer (bit 7 of the packet
+// type starts a new packet and overwrites the buffer; bit 6 appends to it) and dispatches the
+// accumulated payload to every subscriber of that ECU. Pure function over the two maps, so the
+// begin/continue masks and the subscriber dispatch are testable offline.
+void processD2Frame(ReceivedMessageMap& received, const SubscriberMap& subscribers,
+                    const PASSTHRU_MSG& msg);
+
 /**
  * @brief This class is used for sending and receiving CAN messages with preprocessing.
  */
@@ -53,8 +66,8 @@ private:
     std::mutex _mutex;
     std::condition_variable _cond;
 
-    std::map<uint8_t, std::vector<uint8_t>> _receivedMessages;
-    std::multimap<uint8_t, ICanMessagesReceiver*> _subscribers;
+    ReceivedMessageMap _receivedMessages;
+    SubscriberMap _subscribers;
 
     bool _isReadEnabled;
     bool _isShutdown;

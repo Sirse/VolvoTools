@@ -84,24 +84,33 @@ void CanMessagesTransceiver::readThread()
     }
 }
 
+void processD2Frame(ReceivedMessageMap& received, const SubscriberMap& subscribers,
+                    const PASSTHRU_MSG& msg)
+{
+    if (msg.DataSize < 5) {
+        return;
+    }
+    const uint8_t ecuType = D2Message::getECUType(msg.Data);
+    const uint8_t packetType = msg.Data[4];
+    // Bit 7 starts a new packet and overwrites the per-ECU buffer; bit 6 appends. Bitwise
+    // tests - "packetType && 0x80" used to be just "packetType is non-zero", which made every
+    // frame a packet start and the continuation branch unreachable.
+    if ((packetType & 0x80) != 0) {
+        received[ecuType] = { msg.Data + 5, msg.Data + msg.DataSize };
+    }
+    else if ((packetType & 0x40) != 0) {
+        received[ecuType].insert(received[ecuType].end(), msg.Data + 5, msg.Data + msg.DataSize);
+    }
+    const auto range = subscribers.equal_range(ecuType);
+    for (auto callback = range.first; callback != range.second; ++callback) {
+        callback->second->onCanMessage(&msg.Data[4], msg.DataSize - 4);
+    }
+}
+
 void CanMessagesTransceiver::processMessages(const std::vector<PASSTHRU_MSG>& msgs)
 {
     for(auto it = msgs.cbegin(); it != msgs.cend(); ++it) {
-        if(it->DataSize < 5)
-            continue;
-        auto ecuType = D2Message::getECUType(it->Data);
-        uint8_t packetType = it->Data[4];
-        // begin of packet
-        if(packetType && 0x80) {
-            _receivedMessages[ecuType] = { it->Data + 5, it->Data + it->DataSize };
-        }
-        else if(packetType && 0x40) {
-            _receivedMessages[ecuType].insert(_receivedMessages[ecuType].end(), it->Data + 5, it->Data + it->DataSize);
-        }
-        const auto range = _subscribers.equal_range(ecuType);
-        for(auto callback = range.first; callback != range.second; ++it) {
-            callback->second->onCanMessage(&it->Data[4], it->DataSize - 4);
-        }
+        processD2Frame(_receivedMessages, _subscribers, *it);
     }
 }
 

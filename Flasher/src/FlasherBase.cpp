@@ -84,6 +84,13 @@ void FlasherBase::unregisterCallback(FlasherCallback &callback)
 
 void FlasherBase::start()
 {
+    std::unique_lock<std::mutex> lock(_mutex);
+    // Assigning a std::thread over a joinable one calls std::terminate. Guard against a second
+    // start() while a run is in flight (or finished but not yet joined). The check and the
+    // assignment happen under the same lock so two concurrent start() calls cannot race.
+    if (_flasherThread.joinable()) {
+        throw std::runtime_error("Flasher already started; wait for completion before starting again");
+    }
     _flasherThread = std::thread([this]() {
         run();
     });
@@ -201,10 +208,14 @@ void FlasherBase::setLastError(const std::string& error)
 
 void FlasherBase::runOnThread(std::function<void()> callable)
 {
-    if(getCurrentState() != FlasherState::Initial) {
-        throw std::runtime_error("Flasher not in initial state");
+    std::unique_lock<std::mutex> lock(_mutex);
+    // Same hazard as start(): assigning a std::thread over a joinable one is std::terminate. The
+    // state check alone is not enough - the thread may not have moved the state off Initial yet,
+    // so a second call could slip through and clobber a live thread. Guard on joinable() instead,
+    // under the same lock as the assignment.
+    if (_flasherThread.joinable()) {
+        throw std::runtime_error("Flasher already started; wait for completion before starting again");
     }
-
     _flasherThread = std::thread([this, callable]() {
         try {
             callable();
