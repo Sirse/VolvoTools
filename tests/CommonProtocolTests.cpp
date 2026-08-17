@@ -152,17 +152,17 @@ const BusConfiguration& busByName(const ConfigurationInfo& conf, const std::stri
 
 } // namespace
 
-// The sample point used to be derived from the baudrate alone (500k -> 80, else 68), which is
-// wrong for P1 CAN MS: the shipped vehicle configuration asks for 60 there. Make sure the value
-// now comes from the configuration.
+// The sample point used to be derived from the baudrate alone (500k -> 80, else 68). Make sure
+// the value now comes from the configuration, on the P3 family that the fork supports.
 TEST(BusConfig, SamplePointComesFromConfiguration)
 {
-    const auto p1 = getConfigurationInfoByCarPlatform(CarPlatform::P1);
-    EXPECT_EQ(busByName(p1, "CAN MS").samplePoint, 60u);
-    EXPECT_EQ(busByName(p1, "CAN HS").samplePoint, 80u);
+    const auto p3 = getConfigurationInfoByCarPlatform(CarPlatform::P3);
+    EXPECT_EQ(busByName(p3, "CAN MS").samplePoint, 68u);
+    EXPECT_EQ(busByName(p3, "CAN HS").samplePoint, 80u);
 
-    const auto p2 = getConfigurationInfoByCarPlatform(CarPlatform::P2);
-    EXPECT_EQ(busByName(p2, "CAN MS").samplePoint, 68u);
+    const auto y413 = getConfigurationInfoByCarPlatform(CarPlatform::P3_Y413);
+    EXPECT_EQ(busByName(y413, "CAN MS").samplePoint, 68u);
+    EXPECT_EQ(busByName(y413, "CAN HS").samplePoint, 80u);
 }
 
 // ---- previously ignored vehicle-configuration fields -----------------------
@@ -502,4 +502,51 @@ TEST(GsaCodec, RoutineNames)
 {
     EXPECT_EQ(sdaRoutineName(SdaRoutine::ActivateSBL), "ActivateSBL");
     EXPECT_EQ(sdaRoutineName(SdaRoutine::GatewayStateAccess), "GatewayStateAccess");
+}
+
+// ---- P3-only platform parsing ---------------------------------------------
+
+// Every value of the P3 family resolves, and legacy p3 still means Y285/Y286/Y381.
+TEST(P3Only, ParsesEveryP3FamilyMember)
+{
+    EXPECT_EQ(parseCarPlatform("p3"), CarPlatform::P3);
+    EXPECT_EQ(parseCarPlatform("P3"), CarPlatform::P3);
+    EXPECT_EQ(parseCarPlatform("p3_y413"), CarPlatform::P3_Y413);
+    EXPECT_EQ(parseCarPlatform("p3_y283_iam"), CarPlatform::P3_Y283_IAM);
+    EXPECT_EQ(parseCarPlatform("p3_y283_icm"), CarPlatform::P3_Y283_ICM);
+    EXPECT_EQ(parseCarPlatform("p3_p313_icm"), CarPlatform::P3_P313_ICM);
+    EXPECT_EQ(parseCarPlatform("p3_p313_iam"), CarPlatform::P3_P313_IAM);
+    EXPECT_EQ(parseCarPlatform("p3_y555_iam"), CarPlatform::P3_Y555_IAM);
+    EXPECT_EQ(parseCarPlatform("p3_y555_icm"), CarPlatform::P3_Y555_ICM);
+    EXPECT_EQ(parseCarPlatform("p3_y312h_iam"), CarPlatform::P3_Y312H_IAM);
+    EXPECT_EQ(parseCarPlatform("p3_y312h_icm"), CarPlatform::P3_Y312H_ICM);
+}
+
+// The old values are gone: a clear error naming the P3 family, never a silent guess.
+TEST(P3Only, RejectsNonP3Platforms)
+{
+    EXPECT_THROW(parseCarPlatform("p2"), std::exception);
+    EXPECT_THROW(parseCarPlatform("p80"), std::exception);
+    EXPECT_THROW(parseCarPlatform("spa"), std::exception);
+    EXPECT_THROW(parseCarPlatform("ford_uds"), std::exception);
+    EXPECT_THROW(parseCarPlatform("ford_kwp"), std::exception);
+    EXPECT_THROW(parseCarPlatform("haval_uds"), std::exception);
+    EXPECT_THROW(parseCarPlatform("vag_med91"), std::exception);
+    EXPECT_THROW(parseCarPlatform("p1"), std::exception);
+}
+
+// Every remaining enum value must resolve to a configuration; this catches the drift between
+// the enum and the string names held together by textual matching.
+TEST(P3Only, EveryPlatformResolvesToConfiguration)
+{
+    EXPECT_NO_THROW((void)getConfigurationInfoByCarPlatform(CarPlatform::P3));
+    EXPECT_NO_THROW((void)getConfigurationInfoByCarPlatform(CarPlatform::P3_Y413));
+    EXPECT_NO_THROW((void)getConfigurationInfoByCarPlatform(CarPlatform::P3_Y283_IAM));
+    EXPECT_NO_THROW((void)getConfigurationInfoByCarPlatform(CarPlatform::P3_Y283_ICM));
+    EXPECT_NO_THROW((void)getConfigurationInfoByCarPlatform(CarPlatform::P3_P313_ICM));
+    EXPECT_NO_THROW((void)getConfigurationInfoByCarPlatform(CarPlatform::P3_P313_IAM));
+    EXPECT_NO_THROW((void)getConfigurationInfoByCarPlatform(CarPlatform::P3_Y555_IAM));
+    EXPECT_NO_THROW((void)getConfigurationInfoByCarPlatform(CarPlatform::P3_Y555_ICM));
+    EXPECT_NO_THROW((void)getConfigurationInfoByCarPlatform(CarPlatform::P3_Y312H_IAM));
+    EXPECT_NO_THROW((void)getConfigurationInfoByCarPlatform(CarPlatform::P3_Y312H_ICM));
 }

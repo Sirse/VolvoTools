@@ -165,20 +165,16 @@ ScriptStep parseStep(const toml::node& node, size_t index)
 const char* platformName(common::CarPlatform platform)
 {
     switch (platform) {
-    case common::CarPlatform::P80: return "P80";
-    case common::CarPlatform::P1: return "P1";
-    case common::CarPlatform::P1_UDS: return "P1_UDS";
-    case common::CarPlatform::P2: return "P2";
-    case common::CarPlatform::P2_250: return "P2_250";
-    case common::CarPlatform::P2_UDS: return "P2_UDS";
     case common::CarPlatform::P3: return "P3";
-    case common::CarPlatform::SPA: return "SPA";
-    case common::CarPlatform::Ford_KWP: return "Ford_KWP";
-    case common::CarPlatform::Ford_UDS: return "Ford_UDS";
-    case common::CarPlatform::Haval_UDS: return "Haval_UDS";
-    case common::CarPlatform::VAG: return "VAG";
-    case common::CarPlatform::VAG_MED91: return "VAG_MED91";
-    case common::CarPlatform::VAG_MED912: return "VAG_MED912";
+    case common::CarPlatform::P3_Y413: return "P3_Y413";
+    case common::CarPlatform::P3_Y283_IAM: return "P3_Y283_IAM";
+    case common::CarPlatform::P3_Y283_ICM: return "P3_Y283_ICM";
+    case common::CarPlatform::P3_P313_ICM: return "P3_P313_ICM";
+    case common::CarPlatform::P3_P313_IAM: return "P3_P313_IAM";
+    case common::CarPlatform::P3_Y555_IAM: return "P3_Y555_IAM";
+    case common::CarPlatform::P3_Y555_ICM: return "P3_Y555_ICM";
+    case common::CarPlatform::P3_Y312H_IAM: return "P3_Y312H_IAM";
+    case common::CarPlatform::P3_Y312H_ICM: return "P3_Y312H_ICM";
     default: return "Undefined";
     }
 }

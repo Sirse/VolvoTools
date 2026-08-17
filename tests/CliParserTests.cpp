@@ -304,7 +304,7 @@ TEST(Cli, ScriptCommandUsesArgparseAndTracksExplicitOverrides)
 {
     RunOptions options;
     ASSERT_TRUE(parse({"script", "--file", "scenario.toml", "--output-dir", "artifacts",
-                       "--trace", "trace.csv", "-d", "Mongoose", "-f", "Ford_UDS",
+                       "--trace", "trace.csv", "-d", "Mongoose", "-f", "P3_Y555_IAM",
                        "-e", "B2", "-b", "125000", "--var", "A=one", "--var", "B=two",
                        "--dry-run"}, options));
 
@@ -314,7 +314,7 @@ TEST(Cli, ScriptCommandUsesArgparseAndTracksExplicitOverrides)
     EXPECT_EQ(options.tracePath, "trace.csv");
     EXPECT_EQ(options.deviceName, "Mongoose");
     ASSERT_TRUE(options.scriptPlatformOverride.has_value());
-    EXPECT_EQ(*options.scriptPlatformOverride, common::CarPlatform::Ford_UDS);
+    EXPECT_EQ(*options.scriptPlatformOverride, common::CarPlatform::P3_Y555_IAM);
     ASSERT_TRUE(options.scriptEcuOverride.has_value());
     EXPECT_EQ(*options.scriptEcuOverride, 0xB2);
     ASSERT_TRUE(options.baudrateOverride.has_value());
@@ -336,10 +336,10 @@ TEST(Script, CliOverridesTomlPlatformAndEcu)
     }
 
     RunOptions options;
-    options.scriptPlatformOverride = common::CarPlatform::Ford_UDS;
+    options.scriptPlatformOverride = common::CarPlatform::P3_Y413;
     options.scriptEcuOverride = 0xB2;
     const auto scenario = loadScriptScenario(path.string(), options);
-    EXPECT_EQ(scenario.platform, common::CarPlatform::Ford_UDS);
+    EXPECT_EQ(scenario.platform, common::CarPlatform::P3_Y413);
     EXPECT_EQ(scenario.ecuId, 0xB2);
 }
 
@@ -351,13 +351,13 @@ TEST(Script, TomlPlatformAndEcuOverrideBuiltInDefaults)
     {
         std::ofstream file(path, std::ios::trunc);
         ASSERT_TRUE(file.is_open());
-        file << "version = 1\nplatform = \"Ford_UDS\"\necu = \"B2\"\n"
+        file << "version = 1\nplatform = \"P3_Y413\"\necu = \"B2\"\n"
                 "steps = [{ uds = \"3E 00\" }]\n";
     }
 
     const RunOptions options;
     const auto scenario = loadScriptScenario(path.string(), options);
-    EXPECT_EQ(scenario.platform, common::CarPlatform::Ford_UDS);
+    EXPECT_EQ(scenario.platform, common::CarPlatform::P3_Y413);
     EXPECT_EQ(scenario.ecuId, 0xB2);
 }
 

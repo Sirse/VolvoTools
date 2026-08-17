@@ -83,7 +83,7 @@ steps = [{ uds = "3E 80" }]
 TEST(ScriptModel, CliOverridesTomlValues)
 {
     RunOptions options;
-    options.scriptPlatformOverride = common::CarPlatform::Ford_UDS;
+    options.scriptPlatformOverride = common::CarPlatform::P3_Y555_ICM;
     options.scriptEcuOverride = 0xB2;
     const auto scenario = load("cli_values", R"(
 version = 1
@@ -91,7 +91,7 @@ platform = "P3"
 ecu = "10"
 steps = [{ uds = "22 D1 00" }]
 )", options);
-    EXPECT_EQ(scenario.platform, common::CarPlatform::Ford_UDS);
+    EXPECT_EQ(scenario.platform, common::CarPlatform::P3_Y555_ICM);
     EXPECT_EQ(scenario.ecuId, 0xB2);
 }
 

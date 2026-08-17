@@ -89,7 +89,7 @@ static bool getRunOptions(int argc, const char *argv[], std::string &deviceName,
   program.add_argument("-v", "--variables").help("Path to memory variables");
   program.add_argument("-o", "--output").help("Path to save logs");
   program.add_argument("-p", "--print").scan<'u', unsigned>().default_value(5u).help("Number of variables which prints to console");
-  program.add_argument("-f", "--platform").default_value(std::string{"P2"}).help("Car's platform, supported values: P80, P1, P1_UDS, P2, P2_250, P2_UDS, P3, SPA");
+  program.add_argument("-f", "--platform").default_value(std::string{"p3"}).help("Car's platform, supported values: p3, p3_y413, p3_y283_iam, p3_y283_icm, p3_p313_icm, p3_p313_iam, p3_y555_iam, p3_y555_icm, p3_y312h_iam, p3_y312h_icm");
   program.add_argument("-e", "--ecu").scan<'x', uint8_t>().default_value(uint8_t(0x7A)).help("ECU id to log");
   program.add_argument("--interval-ms").scan<'u', unsigned>().default_value(50u).help("Logging interval in milliseconds");
   program.add_argument("--uds-did-base").scan<'x', uint16_t>().default_value(uint16_t(0xF200)).help("Base dynamic DID for UDS logger");

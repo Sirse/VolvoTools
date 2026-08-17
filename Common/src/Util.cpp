@@ -43,34 +43,34 @@ namespace {
         }
     };
 
-    constexpr const char* supportedCarPlatforms = "P80, P1, P1_UDS, P2, P2_250, P2_UDS, P3, SPA, Ford_KWP, Ford_UDS, Haval_UDS";
+    constexpr const char* supportedCarPlatforms =
+        "p3, p3_y413, p3_y283_iam, p3_y283_icm, p3_p313_icm, p3_p313_iam, "
+        "p3_y555_iam, p3_y555_icm, p3_y312h_iam, p3_y312h_icm";
 
     CarPlatform parseCarPlatformImpl(std::string input, bool throwOnUnknown)
     {
         const auto originalInput = input;
         input = toLower(input);
-        if ("p80" == input)
-            return common::CarPlatform::P80;
-        else if ("p1" == input)
-            return common::CarPlatform::P1;
-        else if ("p1_uds" == input)
-            return common::CarPlatform::P1_UDS;
-        else if ("p2" == input)
-            return common::CarPlatform::P2;
-        else if ("p2_250" == input)
-            return common::CarPlatform::P2_250;
-        else if ("p2_uds" == input)
-            return common::CarPlatform::P2_UDS;
-        else if ("p3" == input)
+        if ("p3" == input)
             return common::CarPlatform::P3;
-        else if ("spa" == input)
-            return common::CarPlatform::SPA;
-        else if ("ford_kwp" == input)
-            return common::CarPlatform::Ford_KWP;
-        else if ("ford_uds" == input)
-            return common::CarPlatform::Ford_UDS;
-        else if ("haval_uds" == input)
-            return common::CarPlatform::Haval_UDS;
+        else if ("p3_y413" == input)
+            return common::CarPlatform::P3_Y413;
+        else if ("p3_y283_iam" == input)
+            return common::CarPlatform::P3_Y283_IAM;
+        else if ("p3_y283_icm" == input)
+            return common::CarPlatform::P3_Y283_ICM;
+        else if ("p3_p313_icm" == input)
+            return common::CarPlatform::P3_P313_ICM;
+        else if ("p3_p313_iam" == input)
+            return common::CarPlatform::P3_P313_IAM;
+        else if ("p3_y555_iam" == input)
+            return common::CarPlatform::P3_Y555_IAM;
+        else if ("p3_y555_icm" == input)
+            return common::CarPlatform::P3_Y555_ICM;
+        else if ("p3_y312h_iam" == input)
+            return common::CarPlatform::P3_Y312H_IAM;
+        else if ("p3_y312h_icm" == input)
+            return common::CarPlatform::P3_Y312H_ICM;
         if (throwOnUnknown) {
             throw std::runtime_error("Unknown car platform \"" + originalInput + "\". Supported values: " + supportedCarPlatforms);
         }
@@ -962,7 +962,9 @@ namespace {
 
     CarPlatform getPlatfromFromVIN(const std::string& vin)
     {
-        CarPlatform result = CarPlatform::Undefined;
+        // The fork is P3-only. A Volvo P3 VIN starts with YV1 and has A or B in position 4
+        // (world manufacturer's designator). Anything else is not a platform we support, so
+        // return Undefined rather than guess a P1/P2/Ford/Haval that cannot be used.
         const std::string volvoPrefix = "YV1";
         if (vin.find(volvoPrefix) == 0)
         {
@@ -970,41 +972,10 @@ namespace {
             {
             case 'A':
             case 'B':
-                result = CarPlatform::P3;
-                break;
-            case 'L':
-                result = CarPlatform::P80;
-                break;
-            case 'T':
-            case 'R':
-            case 'S':
-            case 'C':
-                result = CarPlatform::P2;
-                break;
-            case 'M':
-                result = CarPlatform::P1;
-                break;
+                return CarPlatform::P3;
             }
-            return result;
         }
-        const std::string fordPrefix = "WF";
-        if (vin.find(fordPrefix) == 0)
-        {
-            switch(vin[8])
-            {
-            case 'B':
-                result = CarPlatform::Ford_UDS;
-                break;
-            }
-            return result;
-        }
-        const std::string havalPrefix = "XZG";
-        if (vin.find(havalPrefix) == 0)
-        {
-            result = CarPlatform::Haval_UDS;
-            return result;
-        }
-        return result;
+        return CarPlatform::Undefined;
     }
 
     CarPlatform parseCarPlatform(std::string input)
@@ -1015,32 +986,26 @@ namespace {
     static std::string getCarPlatformName(CarPlatform carPlatform)
     {
         switch (carPlatform) {
-        case CarPlatform::P80:
-            return "P80";
-        case CarPlatform::P1:
-            return "P1x (D2) - Elsys 1";
-        case CarPlatform::P1_UDS:
-            return "P1010 (D2/GGD) - Elsys 2";
-        case CarPlatform::P2_250:
-            return "P2x -2004w20 (CAN-HS 250kbit/s)";
-        case CarPlatform::P2:
-            return "P2x 2004w20- (CAN-HS 500kbit/s)";
-        case CarPlatform::P2_UDS:
-            return "P28 - V8/SI6";
         case CarPlatform::P3:
             return "Y285/Y286/Y381";
-        case CarPlatform::SPA:
-            return "EUCD/C1MCA - Generic";
-        case CarPlatform::VAG_MED91:
-            return "vag_med91";
-        case CarPlatform::VAG_MED912:
-            return "vag_med912";
-        case CarPlatform::Ford_KWP:
-            return "ford_kwp";
-        case CarPlatform::Ford_UDS:
-            return "ford_uds";
-        case CarPlatform::Haval_UDS:
-            return "haval_uds";
+        case CarPlatform::P3_Y413:
+            return "Y413";
+        case CarPlatform::P3_Y283_IAM:
+            return "Y283/Y352 (Sub-Tester = IAM)";
+        case CarPlatform::P3_Y283_ICM:
+            return "Y283/Y352 (Sub-Tester = ICM)";
+        case CarPlatform::P3_P313_ICM:
+            return "P313 (SubTester = ICM/IHU)";
+        case CarPlatform::P3_P313_IAM:
+            return "P313 (SubTester = IAM)";
+        case CarPlatform::P3_Y555_IAM:
+            return "Y555 (Sub-Tester = IAM)";
+        case CarPlatform::P3_Y555_ICM:
+            return "Y555 (Sub-Tester = ICM)";
+        case CarPlatform::P3_Y312H_IAM:
+            return "Y312H (Sub-Tester = IAM)";
+        case CarPlatform::P3_Y312H_ICM:
+            return "Y312H (Sub-Tester = ICM)";
         }
         return {};
     }
