@@ -9,6 +9,7 @@ add_executable(VolvoToolsTests
     TestMain.cpp
     CommonProtocolTests.cpp
     UploadIntegrityTests.cpp
+    TransceiverAndD2Tests.cpp
     CliParserTests.cpp
     ScriptModelTests.cpp
 )
