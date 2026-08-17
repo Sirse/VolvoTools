@@ -18,8 +18,6 @@
 namespace logger {
 	class LoggerCallback;
 
-	enum class LoggerType { LT_D2, LT_UDS };
-
 	class LoggerImpl;
 
 	struct UdsLoggerOptions {

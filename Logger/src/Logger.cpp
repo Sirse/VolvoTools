@@ -3,9 +3,6 @@
 #include "logger/LoggerCallback.hpp"
 
 #include <common/CommonData.hpp>
-#include <common/protocols/D2Request.hpp>
-#include <common/protocols/D2Message.hpp>
-#include <common/protocols/D2Messages.hpp>
 #include <common/protocols/UDSRequest.hpp>
 #include <common/protocols/UDSProtocolCommonSteps.hpp>
 #include <common/Util.hpp>
@@ -45,148 +42,7 @@ namespace logger {
 				const LogParameters& parameters) = 0;
 	};
 
-	class D2LoggerImpl : public LoggerImpl {
-	public:
-        D2LoggerImpl() : LoggerImpl() {}
-
-	private:
-        const common::D2Message requstMemoryMessage{
-            common::D2Messages::requestMemory};
-
-		unsigned long getNumberOfCanMessages(const LogParameters& parameters) const {
-			double totalDataLength =
-				std::accumulate(parameters.parameters().cbegin(), parameters.parameters().cend(), static_cast<size_t>(0),
-					[](size_t prevValue, const auto& param) {
-						return prevValue + param.size();
-					});
-			return static_cast<unsigned long>(std::ceil((totalDataLength - 3) / 7)) + 1;
-		}
-
-		virtual void registerParameters(j2534::J2534Channel& channel,
-			const LogParameters& parameters) override {
-            common::D2Request unregisterRequest{common::D2Messages::unregisterAllMemoryRequest};
-            unregisterRequest.process(channel);
-            for (const auto parameter : parameters.parameters()) {
-                common::D2Request registerParameterRequest{
-					common::D2Messages::makeRegisterAddrRequest(parameter.addr(),
-																parameter.size()) };
-                registerParameterRequest.process(channel);
-			}
-		}
-
-		virtual std::vector<uint32_t>
-			requestMemory(j2534::J2534Channel& channel,
-				const LogParameters& parameters) override {
-			const auto numberOfCanMessages = getNumberOfCanMessages(parameters);
-			std::vector<uint32_t> result(parameters.parameters().size());
-			unsigned long writtenCount = 1;
-			const auto writeStatus = channel.writeMsgs(requstMemoryMessage, writtenCount);
-			if (writeStatus != STATUS_NOERROR || writtenCount == 0) {
-				throw std::runtime_error("Failed to send D2 logger memory request");
-			}
-			if (writtenCount > 0) {
-				std::vector<PASSTHRU_MSG> logMessages(numberOfCanMessages);
-				const auto readStatus = channel.readMsgs(logMessages);
-				if (readStatus != STATUS_NOERROR || logMessages.size() < numberOfCanMessages) {
-					throw std::runtime_error("Failed to read D2 logger memory response");
-				}
-
-				const auto requireDataSize = [](const PASSTHRU_MSG& msg, size_t size) {
-					if (msg.DataSize < size) {
-						throw std::runtime_error("Short D2 logger memory response");
-					}
-				};
-
-				size_t paramIndex = 0;
-				size_t paramOffset = 0;
-				uint32_t value = 0;
-				for (const auto& msg : logMessages) {
-					size_t msgOffset = 5;
-					requireDataSize(msg, 9);
-					// E6 F0 00 - read record by identifier answer
-					if (msg.Data[4] == 0x8F &&
-						msg.Data[5] == static_cast<uint8_t>(common::ECUType::ECM_ME) &&
-						msg.Data[6] == 0xE6 && msg.Data[7] == 0xF0 && msg.Data[8] == 0)
-						msgOffset = 9;
-					requireDataSize(msg, msgOffset);
-					for (size_t i = msgOffset; i < 12; ++i) {
-						if (paramIndex >= parameters.parameters().size())
-							break;
-						requireDataSize(msg, i + 1);
-						const auto& param = parameters.parameters()[paramIndex];
-						value += msg.Data[i] << ((param.size() - paramOffset - 1) * 8);
-						++paramOffset;
-						if (paramOffset >= param.size()) {
-							result[paramIndex] = value;
-							++paramIndex;
-							paramOffset = 0;
-							value = 0;
-						}
-						if (paramIndex >= parameters.parameters().size())
-							break;
-					}
-				}
-			}
-			return result;
-		}
-	};
-
-    class AW55D2LoggerImpl : public LoggerImpl {
-    public:
-        AW55D2LoggerImpl() : LoggerImpl() {}
-
-    private:
-        virtual void registerParameters(j2534::J2534Channel&, const LogParameters&) override
-        {
-        }
-
-        virtual std::vector<uint32_t>
-        requestMemory(j2534::J2534Channel& channel,
-                      const LogParameters& parameters) override
-        {
-            std::vector<uint32_t> result(parameters.parameters().size());
-            for (size_t i = 0; i < parameters.parameters().size(); ++i) {
-                common::D2Request readMemoryRequest{
-                    common::D2Messages::createReadDataByOffsetMsg(
-                    static_cast<uint8_t>(common::ECUType::TCM), parameters.parameters()[i].addr(),
-                        static_cast<uint8_t>(parameters.parameters()[i].size())) };
-
-                auto readResponse{ readMemoryRequest.process(channel) };
-                result[i] = common::encodeLittleEndian(readResponse);
-            }
-            return result;
-        }
-    };
-
-    class TF80D2LoggerImpl : public LoggerImpl {
-    public:
-        TF80D2LoggerImpl() : LoggerImpl() {}
-
-    private:
-        virtual void registerParameters(j2534::J2534Channel&, const LogParameters&) override
-        {
-        }
-
-        virtual std::vector<uint32_t>
-        requestMemory(j2534::J2534Channel& channel,
-                      const LogParameters& parameters) override
-        {
-            std::vector<uint32_t> result(parameters.parameters().size());
-            for (size_t i = 0; i < parameters.parameters().size(); ++i) {
-                common::D2Request readMemoryRequest{
-                    common::D2Messages::createReadTCMTF80DataByAddr(
-                        parameters.parameters()[i].addr(),
-                        parameters.parameters()[i].size()) };
-
-                auto readResponse{ readMemoryRequest.process(channel, 200, 3) };
-                readResponse.erase(readResponse.begin(), readResponse.begin() + 4);
-                result[i] = common::encodeBigEndian(readResponse);
-            }
-            return result;
-        }
-    };
-
-    class UDSLoggerImpl : public LoggerImpl {
+	class UDSLoggerImpl : public LoggerImpl {
 	public:
         UDSLoggerImpl(uint32_t canId, UdsLoggerOptions options)
             : LoggerImpl()
@@ -380,44 +236,11 @@ namespace logger {
                                                  const std::string& cmInfo, UdsLoggerOptions udsOptions)
 	{
 		using common::CarPlatform;
-		if (cmId == 0x7A && (carPlatform == CarPlatform::P80 || carPlatform == CarPlatform::P1
-			|| carPlatform == CarPlatform::P2 || carPlatform == CarPlatform::P2_250)) {
-            return std::make_unique<D2LoggerImpl>();
-		}
-        if (cmId == 0x6E && (carPlatform == CarPlatform::P80 || carPlatform == CarPlatform::P2
-			|| carPlatform == CarPlatform::P2_250)) {
-			if (common::toLower(cmInfo) == "aw55") {
-                return std::make_unique<AW55D2LoggerImpl>();
-			}
-            else if (common::toLower(cmInfo) == "tf80_p2") {
-                return std::make_unique<TF80D2LoggerImpl>();
-			}
-        }
+        (void)cmInfo;
         const common::ECUInfo ecuInfo{ std::get<1>(common::getEcuInfoByEcuId(carPlatform, cmId)) };
-        if (carPlatform == CarPlatform::P3 || carPlatform == CarPlatform::Ford_UDS) {
-            return std::make_unique<UDSLoggerImpl>(ecuInfo.canId, udsOptions);
-        }
-        else if (carPlatform == CarPlatform::Haval_UDS) {
-            return std::make_unique<UDSSlowLoggerImpl>(ecuInfo.canId);
-        }
-        throw std::runtime_error("Not implemented");
-	}
-
-	LoggerType getLoggerType(common::CarPlatform carPlatform)
-	{
-		switch (carPlatform)
-		{
-		case common::CarPlatform::P1:
-		case common::CarPlatform::P2:
-		case common::CarPlatform::P80:
-			return LoggerType::LT_D2;
-		case common::CarPlatform::P3:
-        case common::CarPlatform::Haval_UDS:
-        case common::CarPlatform::Ford_UDS:
-			return LoggerType::LT_UDS;
-		default:
-			throw std::runtime_error("Unsupported car platform");
-		}
+        // The fork is P3-only, served by the UDS logger. cmId selects which UDS DID base/ECU to
+        // read; the slow logger variant is kept for P3 targets too.
+        return std::make_unique<UDSLoggerImpl>(ecuInfo.canId, udsOptions);
 	}
 
     Logger::Logger(j2534::J2534& j2534, common::CarPlatform carPlatform, uint32_t ecuId,
