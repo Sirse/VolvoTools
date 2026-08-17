@@ -84,8 +84,15 @@ bool isUdsPlatform(common::CarPlatform carPlatform)
 {
     using common::CarPlatform;
     return carPlatform == CarPlatform::P3
-        || carPlatform == CarPlatform::Ford_UDS
-        || carPlatform == CarPlatform::Haval_UDS;
+        || carPlatform == CarPlatform::P3_Y413
+        || carPlatform == CarPlatform::P3_Y283_IAM
+        || carPlatform == CarPlatform::P3_Y283_ICM
+        || carPlatform == CarPlatform::P3_P313_ICM
+        || carPlatform == CarPlatform::P3_P313_IAM
+        || carPlatform == CarPlatform::P3_Y555_IAM
+        || carPlatform == CarPlatform::P3_Y555_ICM
+        || carPlatform == CarPlatform::P3_Y312H_IAM
+        || carPlatform == CarPlatform::P3_Y312H_ICM;
 }
 
 void ensureUdsPlatform(common::CarPlatform carPlatform)
