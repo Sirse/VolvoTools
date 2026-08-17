@@ -25,33 +25,9 @@ std::unique_ptr<j2534::J2534Channel> createChannelByBusConf(j2534::J2534& j2534,
         // and let the channel fall back to the baudrate-derived default.
         bus.samplePoint = 0;
     }
-    if(bus.protocolId == CAN) {
-        const unsigned long flags = (bus.canIdBitSize == 29)? CAN_29BIT_ID : 0;
-        if(bus.baudrate != 125000) {
-            return openChannel(j2534, bus.protocolId, flags, bus.baudrate, false, bus.samplePoint);
-        }
-        else {
-            return openLowSpeedChannel(j2534, flags, bus.samplePoint);
-        }
-    }
-    else if(bus.protocolId == ISO15765) {
-        return openUDSChannel(j2534, bus.baudrate, canId, bus.samplePoint);
-    }
-    else if(bus.protocolId == ISO14230) {
-        return openTP20Channel(j2534, bus.baudrate, canId);
-    }
-    throw std::runtime_error("Unsupported protocol");
-}
-
-std::unique_ptr<j2534::J2534Channel> openBridgeChannelIfNeeded(j2534::J2534& j2534, CarPlatform carPlatform)
-{
-    const auto conf{ getConfigurationInfoByCarPlatform(carPlatform) };
-    for(const auto& bus: conf.busInfo) {
-        if(bus.baudrate == 250000) {
-            return openBridgeChannel(j2534);
-        }
-    }
-    return {};
+    // The fork is P3-only, so every bus is ISO15765. The CAN and ISO14230/TP20 branches were
+    // unreachable once the non-P3 configurations were removed and are gone.
+    return openUDSChannel(j2534, bus.baudrate, canId, bus.samplePoint);
 }
 
 }
@@ -61,15 +37,11 @@ J2534ChannelProvider::J2534ChannelProvider(j2534::J2534& j2534, CarPlatform carP
     : _j2534{ j2534 }
     , _carPlatform{ carPlatform }
     , _baudrateOverride{ baudrateOverride }
-    , _bridgeChannel{}
 {
     LOG(INFO) << "J2534ChannelProvider init platform=" << static_cast<int>(_carPlatform);
     if (_baudrateOverride.has_value()) {
         LOG(INFO) << "J2534ChannelProvider baudrate override=" << *_baudrateOverride;
     }
-    _bridgeChannel = openBridgeChannelIfNeeded(_j2534, _carPlatform);
-    LOG(INFO) << "J2534ChannelProvider init done, bridge="
-        << (_bridgeChannel ? "open" : "not-needed");
 }
 
 J2534ChannelProvider::~J2534ChannelProvider()

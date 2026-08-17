@@ -90,27 +90,11 @@ namespace common {
     // payload. Throws std::runtime_error if the frame is too short to contain a payload.
     std::vector<uint8_t> udsPayload(const std::vector<uint8_t>& response);
 
-    // SamplePoint is the CAN bit sample point in percent; 0 keeps the old
-    // baudrate-derived default. Pass BusConfiguration::samplePoint when you have it.
-    std::unique_ptr<j2534::J2534Channel>
-        openChannel(j2534::J2534& j2534, unsigned long ProtocolID, unsigned long Flags,
-            unsigned long Baudrate, bool AdditionalConfiguration = false,
-            unsigned long SamplePoint = 0);
-
     std::unique_ptr<j2534::J2534Channel>
         openUDSChannel(j2534::J2534& j2534, unsigned long Baudrate, uint32_t canId = 0,
             unsigned long SamplePoint = 0);
 
     bool prepareUDSChannel(const j2534::J2534Channel& channel, uint32_t canId);
-    bool prepareTP20Channel(const j2534::J2534Channel& channel, uint32_t canId);
-
-    std::unique_ptr<j2534::J2534Channel>
-    openTP20Channel(j2534::J2534& j2534, unsigned long Baudrate, uint32_t canId = 0);
-
-    std::unique_ptr<j2534::J2534Channel> openLowSpeedChannel(j2534::J2534& j2534,
-        unsigned long Flags, unsigned long SamplePoint = 0);
-
-    std::unique_ptr<j2534::J2534Channel> openBridgeChannel(j2534::J2534& j2534);
 
     PASSTHRU_MSG makePassThruMsg(unsigned long ProtocolID, unsigned long Flags,
         const std::vector<uint8_t>& data);

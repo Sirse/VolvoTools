@@ -39,7 +39,6 @@ private:
     j2534::J2534& _j2534;
     CarPlatform _carPlatform;
     std::optional<uint32_t> _baudrateOverride;
-    std::unique_ptr<j2534::J2534Channel> _bridgeChannel;
 };
 
 } // namespace common
