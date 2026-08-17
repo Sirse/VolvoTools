@@ -2,8 +2,6 @@
 
 #include "common/CommonData.hpp"
 #include "common/BusConfiguration.hpp"
-#include "common/protocols/D2Error.hpp"
-#include "common/protocols/TP20Error.hpp"
 #include "common/protocols/UDSError.hpp"
 #include "common/ECUInfo.hpp"
 
@@ -1229,14 +1227,6 @@ namespace {
         return loadConfigurationImpl(YAML::Load(input));
     }
 
-    void checkTP20Error(uint8_t requestId, const uint8_t* data, size_t dataSize)
-    {
-        if (dataSize < 3 || data[0] != 0x7F || data[1] != requestId) {
-            return;
-        }
-        throw TP20Error(data[2]);
-    }
-
     void checkUDSError(uint8_t requestId, const uint8_t* data, size_t dataSize)
     {
         if(dataSize < 7 || data[4] != 0x7F || data[5] != requestId) {
@@ -1244,14 +1234,6 @@ namespace {
         }
         const uint32_t responseCanId = encodeBigEndian(data[0], data[1], data[2], data[3]);
         throw UDSError(data[6], data[5], responseCanId);
-    }
-
-    void checkD2Error(uint8_t ecuId, const std::vector<uint8_t>& requestId, const uint8_t* data, size_t dataSize)
-    {
-        if(dataSize < 7 || data[4] != 0x7F || data[5] != ecuId) {
-            return;
-        }
-        throw D2Error(data[6]);
     }
 
     CarPlatform parsePlatform(std::string input)
