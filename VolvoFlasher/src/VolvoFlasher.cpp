@@ -164,7 +164,7 @@ bool getRunOptions(int argc, const char* argv[], std::string& deviceName,
 	program.add_argument("-d", "--device").default_value(std::string{}).help("Device name");
 	program.add_argument("-b", "--baudrate").scan<'u', unsigned long>().default_value(500000ul).help("CAN bus speed");
 	program.add_argument("-f", "--platform").default_value(std::string{ "p3" }).help("Car's platform, supported values: p3, p3_y413, p3_y283_iam, p3_y283_icm, p3_p313_icm, p3_p313_iam, p3_y555_iam, p3_y555_icm, p3_y312h_iam, p3_y312h_icm");
-	program.add_argument("-e", "--ecu").scan<'x', unsigned int>().default_value(0x7Au).help("ECU id, hexadecimal byte");
+	program.add_argument("-e", "--ecu").scan<'x', unsigned int>().default_value(0x10u).help("ECU id, hexadecimal byte (P3 default: ECM 0x10)");
 	program.add_argument("-p", "--pin").help("PIN to unlock ECU, exactly 5 hex bytes, e.g. AABBCCDDEE (or \"AA BB CC DD EE\")");
 
 	argparse::ArgumentParser flash_command("flash", "1.0", argparse::default_arguments::help);

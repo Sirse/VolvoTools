@@ -57,7 +57,7 @@ Big thanks to maZer.GTi for motivation.
 
 - `VolvoFlasher` — прошивка/чтение и низкоуровневые UDS-команды. Сырые UDS-запросы
   шлёт подкоманда `uds-raw` (пишется через дефис, не `uds raw`), например:
-  `VolvoFlasher uds-raw -f P3 -e 0x7A --wake --session ext --data "22 F1 90"`.
+  `VolvoFlasher uds-raw -f P3 -e 0x10 --wake --session ext --data "22 F1 90"`.
 - `VolvoDiag` — диагностика UDS/OBD и работа с сырым CAN.
 - `VolvoLogger` — логирование параметров.
 
