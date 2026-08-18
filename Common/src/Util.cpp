@@ -20,6 +20,7 @@
 #include <iomanip>
 #include <iostream>
 #include <locale>
+#include <map>
 #include <sstream>
 #include <stdexcept>
 #include <thread>
@@ -839,27 +840,29 @@ namespace {
 
     static std::string getCarPlatformName(CarPlatform carPlatform)
     {
+        // Returns the cliName (the --platform value) for the enum. getConfigurationInfoByCarPlatform
+        // matches configurations on this, replacing the old textual match against the display name.
         switch (carPlatform) {
         case CarPlatform::P3:
-            return "Y285/Y286/Y381";
+            return "p3";
         case CarPlatform::P3_Y413:
-            return "Y413";
+            return "p3_y413";
         case CarPlatform::P3_Y283_IAM:
-            return "Y283/Y352 (Sub-Tester = IAM)";
+            return "p3_y283_iam";
         case CarPlatform::P3_Y283_ICM:
-            return "Y283/Y352 (Sub-Tester = ICM)";
+            return "p3_y283_icm";
         case CarPlatform::P3_P313_ICM:
-            return "P313 (SubTester = ICM/IHU)";
+            return "p3_p313_icm";
         case CarPlatform::P3_P313_IAM:
-            return "P313 (SubTester = IAM)";
+            return "p3_p313_iam";
         case CarPlatform::P3_Y555_IAM:
-            return "Y555 (Sub-Tester = IAM)";
+            return "p3_y555_iam";
         case CarPlatform::P3_Y555_ICM:
-            return "Y555 (Sub-Tester = ICM)";
+            return "p3_y555_icm";
         case CarPlatform::P3_Y312H_IAM:
-            return "Y312H (Sub-Tester = IAM)";
+            return "p3_y312h_iam";
         case CarPlatform::P3_Y312H_ICM:
-            return "Y312H (Sub-Tester = ICM)";
+            return "p3_y312h_icm";
         }
         return {};
     }
@@ -875,7 +878,7 @@ namespace {
         const auto& configurationInfo{staticConfiguration()};
         const auto platformName = getCarPlatformName(carPlatform);
         const auto confIt = std::find_if(configurationInfo.cbegin(), configurationInfo.cend(), [&platformName](const ConfigurationInfo& info) {
-            return info.name == platformName;
+            return info.cliName == platformName;
         });
         if (confIt == configurationInfo.cend()) {
             throw std::runtime_error("Unknown platform " + platformName);
@@ -996,7 +999,19 @@ namespace {
 
     static bool getFlag(const YAML::Node& node, const std::string& tag)
     {
-        return node[tag].IsDefined() && node[tag].as<uint32_t>(0) != 0;
+        if (!node[tag].IsDefined()) {
+            return false;
+        }
+        // v1 wrote flags as integers (SBLInPBL: 1), v2 as booleans (sblInPbl: true). Accept both.
+        if (node[tag].as<uint32_t>(0) != 0) {
+            return true;
+        }
+        try {
+            return node[tag].as<bool>();
+        }
+        catch (...) {
+            return false;
+        }
     }
 
     static ECUInfo processEcuNode(const YAML::Node& node)
@@ -1037,8 +1052,91 @@ namespace {
         return CAN;
     }
 
+    static ECUInfo processEcuNodeV2(const YAML::Node& node)
+    {
+        ECUInfo ecuInfo;
+        ecuInfo.name = node["name"].as<std::string>();
+        ecuInfo.ecuId = std::stoi(getNonEmptyHexIntString(node["address"].as<std::string>("")), 0, 16);
+        ecuInfo.canId = std::stoi(getNonEmptyHexIntString(node["canId"].as<std::string>("")), 0, 16);
+        ecuInfo.compressionType = getEcuCompression(node);
+        ecuInfo.encryptionType = getEcuEncryption(node);
+        ecuInfo.sblInPBL = getFlag(node, "sblInPbl");
+        ecuInfo.swdlIssue = getFlag(node, "swdlIssue");
+        ecuInfo.masterEcu = getFlag(node, "masterEcu");
+        if (node["securityPin"].IsDefined()) {
+            ecuInfo.securityPin = parseSecurityPin(node["securityPin"].as<std::string>());
+        }
+        return ecuInfo;
+    }
+
+    static GatewayEndpoint processEndpointNodeV2(const YAML::Node& node, const std::string& tag)
+    {
+        GatewayEndpoint endpoint;
+        if (!node[tag].IsDefined()) {
+            return endpoint;
+        }
+        const auto& entry = node[tag];
+        endpoint.ecuAddress = std::stoi(getNonEmptyHexIntString(entry["ecuAddress"].as<std::string>("")), 0, 16);
+        endpoint.canId = std::stoi(getNonEmptyHexIntString(entry["canId"].as<std::string>("")), 0, 16);
+        endpoint.name = entry["name"].as<std::string>("");
+        return endpoint;
+    }
+
     static std::vector<ConfigurationInfo> loadConfigurationImpl(const YAML::Node& node)
     {
+        // v2 schema: a shared ECU pool plus defaults and configurations that reference pool ids.
+        if (node["version"].IsDefined() && node["version"].as<int>() == 2) {
+            std::vector<ConfigurationInfo> result;
+
+            const auto& defaultsNode = node["defaults"];
+            const auto& defaultsBus = defaultsNode["bus"];
+            const auto& defaultsSwdl = defaultsNode["swdl"];
+
+            std::map<std::string, ECUInfo> pool;
+            for (const auto& kv : node["ecus"]) {
+                pool.emplace(kv.first.as<std::string>(), processEcuNodeV2(kv.second));
+            }
+
+            for (const auto& confNode : node["configurations"]) {
+                ConfigurationInfo info;
+                info.name = confNode["name"].as<std::string>();
+                info.cliName = confNode["cliName"].as<std::string>();
+                if (info.cliName.empty()) {
+                    throw std::runtime_error("Configuration \"" + info.name + "\" is missing a required unique cliName");
+                }
+                info.gatewaySubTester = processEndpointNodeV2(confNode, "gatewaySubTester");
+                info.subTester = processEndpointNodeV2(confNode, "subTester");
+
+                for (const auto& bus : confNode["buses"]) {
+                    BusConfiguration busConf;
+                    const auto busName = bus["name"].as<std::string>();
+                    busConf.name = busName;
+                    const auto& busDefault = defaultsBus[busName];
+                    busConf.baudrate = busDefault["baudRate"].as<uint32_t>() * 1000;
+                    busConf.canIdBitSize = busDefault["canIdBitSize"].as<uint32_t>();
+                    busConf.samplePoint = busDefault["samplePoint"].as<uint32_t>(0);
+                    busConf.p4CanMax = defaultsSwdl["p4CanMax"].as<uint32_t>(0);
+                    busConf.swdlSpecification = std::stoul(defaultsSwdl["specification"].as<std::string>("0"));
+                    busConf.protocolId = getCanProtocol(defaultsSwdl["protocol"].as<std::string>(""));
+
+                    for (const auto& idNode : bus["ecus"]) {
+                        const auto id = idNode.as<std::string>();
+                        const auto it = pool.find(id);
+                        if (it == pool.end()) {
+                            throw std::runtime_error("Unknown ECU id \"" + id + "\" referenced by configuration \""
+                                + info.name + "\" bus \"" + busName + "\"");
+                        }
+                        busConf.ecuInfo.emplace_back(it->second);
+                    }
+                    info.busInfo.emplace_back(std::move(busConf));
+                }
+                result.emplace_back(std::move(info));
+            }
+            return result;
+        }
+
+        // Legacy v1 schema (pre-pool, pre-defaults), kept until the golden equivalence test is
+        // green and the migration is accepted; removed by a follow-up commit.
         std::vector<ConfigurationInfo> result;
         auto confNodes = node["Configuration"];
         for (const auto& confNode : confNodes) {
@@ -1106,6 +1204,51 @@ namespace {
             static_cast<uint8_t>((pin >> 8) & 0xFF),
             static_cast<uint8_t>(pin & 0xFF)
         };
+    }
+
+    std::array<uint8_t, 5> parseSecurityPin(const std::string& hex)
+    {
+        std::string compact;
+        compact.reserve(hex.size());
+        for (const auto ch : hex) {
+            if (ch != ' ' && ch != '\t') {
+                compact.push_back(ch);
+            }
+        }
+        if (compact.size() != 10) {
+            throw std::runtime_error(
+                "SecurityAccess PIN must be exactly 5 hex bytes (10 hex digits), got \"" + hex + "\"");
+        }
+        std::array<uint8_t, 5> pin{};
+        const auto hexVal = [](char c) -> int {
+            if (c >= '0' && c <= '9') return c - '0';
+            if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+            if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+            throw std::runtime_error("SecurityAccess PIN contains a non-hex character");
+        };
+        for (size_t i = 0; i < 5; ++i) {
+            pin[i] = static_cast<uint8_t>((hexVal(compact[2 * i]) << 4) | hexVal(compact[2 * i + 1]));
+        }
+        return pin;
+    }
+
+    bool hasSecurityPin(const std::array<uint8_t, 5>& pin)
+    {
+        for (const auto byte : pin) {
+            if (byte != 0) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    uint64_t securityPinToUint64(const std::array<uint8_t, 5>& pin)
+    {
+        uint64_t value = 0;
+        for (const auto byte : pin) {
+            value = (value << 8) | byte;
+        }
+        return value;
     }
 
     void initLogger(const std::string& logFilename, bool debugLogging)

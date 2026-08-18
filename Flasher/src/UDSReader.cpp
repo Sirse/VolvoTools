@@ -26,12 +26,7 @@ void setFailure(const std::string& message, const std::function<void(const std::
 
 bool hasSecurityPin(const std::array<uint8_t, 5>& pin)
 {
-    for (const auto byte : pin) {
-        if (byte != 0) {
-            return true;
-        }
-    }
-    return false;
+    return common::hasSecurityPin(pin);
 }
 
 }

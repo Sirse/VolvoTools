@@ -8,6 +8,7 @@
 #include <gtest/gtest.h>
 
 #include <fstream>
+#include <set>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -550,3 +551,135 @@ TEST(P3Only, EveryPlatformResolvesToConfiguration)
     EXPECT_NO_THROW((void)getConfigurationInfoByCarPlatform(CarPlatform::P3_Y312H_IAM));
     EXPECT_NO_THROW((void)getConfigurationInfoByCarPlatform(CarPlatform::P3_Y312H_ICM));
 }
+
+// ---- data.yaml v2 golden equivalence ----------------------------------------
+
+namespace {
+
+std::string readTextFile(const std::string& path)
+{
+    std::ifstream in(path, std::ios::binary);
+    if (!in.good()) {
+        throw std::runtime_error("can't open " + path);
+    }
+    return std::string((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+}
+
+// Compares everything the parser reads out of the ECU records. securityPin is deliberately
+// excluded: it is new to the v2 schema, so the v1 snapshot cannot carry it.
+bool sameEcu(const ECUInfo& a, const ECUInfo& b)
+{
+    return a.ecuId == b.ecuId && a.canId == b.canId && a.name == b.name
+        && a.sblInPBL == b.sblInPBL && a.swdlIssue == b.swdlIssue && a.masterEcu == b.masterEcu;
+}
+
+bool sameEndpoint(const GatewayEndpoint& a, const GatewayEndpoint& b)
+{
+    return a.ecuAddress == b.ecuAddress && a.canId == b.canId && a.name == b.name;
+}
+
+bool sameBus(const BusConfiguration& a, const BusConfiguration& b)
+{
+    if (a.name != b.name || a.protocolId != b.protocolId || a.baudrate != b.baudrate
+        || a.canIdBitSize != b.canIdBitSize || a.samplePoint != b.samplePoint
+        || a.p4CanMax != b.p4CanMax || a.swdlSpecification != b.swdlSpecification
+        || a.ecuInfo.size() != b.ecuInfo.size()) {
+        return false;
+    }
+    for (size_t i = 0; i < a.ecuInfo.size(); ++i) {
+        if (!sameEcu(a.ecuInfo[i], b.ecuInfo[i])) {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool sameConfiguration(const ConfigurationInfo& a, const ConfigurationInfo& b)
+{
+    // cliName is new to the v2 schema (the v1 file cannot carry it), so it is excluded here the
+    // same way securityPin is; it is asserted separately by EveryConfigurationHasUniqueCliName.
+    if (a.name != b.name || !sameEndpoint(a.gatewaySubTester, b.gatewaySubTester)
+        || !sameEndpoint(a.subTester, b.subTester) || a.busInfo.size() != b.busInfo.size()) {
+        return false;
+    }
+    for (size_t i = 0; i < a.busInfo.size(); ++i) {
+        if (!sameBus(a.busInfo[i], b.busInfo[i])) {
+            return false;
+        }
+    }
+    return true;
+}
+
+} // namespace
+
+// The v2 schema (shared ECU pool + defaults + cliName) must expand to exactly the same
+// ConfigurationInfo as the pre-migration v1 file parsed through the v1 code path: the same number
+// of configurations, the same buses, the same ECUs in the same order (order decides which channel
+// opens first), and the same fields. This is the acceptance gate for the migration -- without it
+// the v2 data.yaml must not merge.
+TEST(ConfigV2, ExpandsIdenticallyToV1)
+{
+    const auto v1 = loadConfiguration(readTextFile(VOLVOTOOLS_DATA_V1_FIXTURE));
+    const auto v2 = loadConfiguration(readTextFile(VOLVOTOOLS_DATA_YAML));
+
+    ASSERT_EQ(v1.size(), v2.size());
+    for (size_t i = 0; i < v1.size(); ++i) {
+        EXPECT_TRUE(sameConfiguration(v1[i], v2[i]))
+            << "configuration index " << i << " differs between v1 and v2";
+    }
+}
+
+// The v2 config must carry a unique cliName for every configuration (the value --platform takes).
+TEST(ConfigV2, EveryConfigurationHasUniqueCliName)
+{
+    const auto configs = loadConfiguration(readTextFile(VOLVOTOOLS_DATA_YAML));
+    ASSERT_FALSE(configs.empty());
+    std::set<std::string> seen;
+    for (const auto& conf : configs) {
+        EXPECT_FALSE(conf.cliName.empty()) << "configuration \"" << conf.name << "\" lacks cliName";
+        EXPECT_FALSE(seen.count(conf.cliName)) << "duplicate cliName " << conf.cliName;
+        seen.insert(conf.cliName);
+    }
+}
+
+// A known SecurityAccess PIN in the pool must survive parsing and reach getEcuInfoByEcuId as the
+// exact 5 bytes, on the platform that carries the ECU.
+TEST(ConfigV2, SecurityPinReachesEcuInfo)
+{
+    // IAM (0x80) on P3 CAN MS has a known PIN 06 4E 9A E1 DE in the pool.
+    const auto [bus, ecu] = getEcuInfoByEcuId(CarPlatform::P3, 0x80);
+    (void)bus;
+    EXPECT_TRUE(ecu.hasSecurityPin());
+    EXPECT_EQ(ecu.securityPin, (std::array<uint8_t, 5>{ 0x06, 0x4E, 0x9A, 0xE1, 0xDE }));
+}
+
+// ECUs without a known PIN report "no pin" (all-zero array), so callers fall back to current
+// behaviour instead of sending a bogus key.
+TEST(ConfigV2, EcuWithoutKnownPinHasEmptySecurityPin)
+{
+    // CEM (0x52) has no known key (individual per vehicle).
+    const auto [bus, ecu] = getEcuInfoByEcuId(CarPlatform::P3, 0x52);
+    (void)bus;
+    EXPECT_FALSE(ecu.hasSecurityPin());
+}
+
+// parseSecurityPin accepts both spaced and packed hex, and rejects malformed input.
+TEST(SecurityPin, ParsesSpacedAndPackedHex)
+{
+    EXPECT_EQ(common::parseSecurityPin("AA BB CC DD EE"),
+        (std::array<uint8_t, 5>{ 0xAA, 0xBB, 0xCC, 0xDD, 0xEE }));
+    EXPECT_EQ(common::parseSecurityPin("AABBCCDDEE"),
+        (std::array<uint8_t, 5>{ 0xAA, 0xBB, 0xCC, 0xDD, 0xEE }));
+    EXPECT_THROW(common::parseSecurityPin("AABBCCDD"), std::exception);      // 4 bytes
+    EXPECT_THROW(common::parseSecurityPin("AABBCCDDEEFF"), std::exception);  // 6 bytes
+    EXPECT_THROW(common::parseSecurityPin("AABBCCDDEG"), std::exception);    // non-hex
+}
+
+// The 5-byte key is 40 bits, so it round-trips through a uint64 as the big-endian integer.
+TEST(SecurityPin, RoundTripsThroughUint64)
+{
+    const auto pin = common::parseSecurityPin("06 4E 9A E1 DE");
+    EXPECT_EQ(common::securityPinToUint64(pin), 0x064E9AE1DEull);
+    EXPECT_EQ(common::getPinArray(common::securityPinToUint64(pin)), pin);
+}
+

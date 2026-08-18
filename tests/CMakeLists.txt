@@ -21,6 +21,9 @@ endif()
 # generated into CommonData.cpp at configure time). Point the sync test at the source YAML.
 target_compile_definitions(VolvoToolsTests PRIVATE
     VOLVOTOOLS_DATA_YAML="${CMAKE_SOURCE_DIR}/Common/common/data.yaml"
+    # The pre-pool v1 schema snapshot, read by the golden equivalence test: the v2 schema must
+    # expand to exactly the same ConfigurationInfo as this file parsed with the v1 code path.
+    VOLVOTOOLS_DATA_V1_FIXTURE="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/data_v1.yaml"
 )
 
 # VolvoDiagCore pulls in Common (protocol/format helpers) and the CLI parser. Flasher is linked

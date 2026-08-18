@@ -148,7 +148,7 @@ uint8_t parseUdsSessionByte(const std::string& input) {
 }
 
 bool getRunOptions(int argc, const char* argv[], std::string& deviceName,
-	unsigned long& baudrate, std::string& flashPath, uint64_t& pin,
+	unsigned long& baudrate, std::string& flashPath, uint64_t& pin, bool& pinSpecified,
 	uint8_t& ecuId, unsigned long& start, unsigned long& datasize,
 	RunMode& runMode, std::string& sblPath, common::CarPlatform& carPlatform,
 	bool& pinUpward, bool& resetFunctional, unsigned long& programHoldSeconds,
@@ -165,7 +165,7 @@ bool getRunOptions(int argc, const char* argv[], std::string& deviceName,
 	program.add_argument("-b", "--baudrate").scan<'u', unsigned long>().default_value(500000ul).help("CAN bus speed");
 	program.add_argument("-f", "--platform").default_value(std::string{ "p3" }).help("Car's platform, supported values: p3, p3_y413, p3_y283_iam, p3_y283_icm, p3_p313_icm, p3_p313_iam, p3_y555_iam, p3_y555_icm, p3_y312h_iam, p3_y312h_icm");
 	program.add_argument("-e", "--ecu").scan<'x', unsigned int>().default_value(0x7Au).help("ECU id, hexadecimal byte");
-	program.add_argument("-p", "--pin").scan<'x', uint64_t>().default_value(static_cast<uint64_t>(0)).help("PIN to unlock ECU");
+	program.add_argument("-p", "--pin").help("PIN to unlock ECU, exactly 5 hex bytes, e.g. AABBCCDDEE (or \"AA BB CC DD EE\")");
 
 	argparse::ArgumentParser flash_command("flash", "1.0", argparse::default_arguments::help);
     addDebugArgument(flash_command);
@@ -304,7 +304,10 @@ bool getRunOptions(int argc, const char* argv[], std::string& deviceName,
 		}
 		ecuId = static_cast<uint8_t>(parsedEcuId);
 		carPlatform = common::parseCarPlatform(program.get<std::string>("-f"));
-		pin = program.get<uint64_t>("-p");
+		pinSpecified = program.present("-p").has_value();
+		if (pinSpecified) {
+			pin = common::securityPinToUint64(common::parseSecurityPin(program.get<std::string>("-p")));
+		}
 		return true;
 	}
 	catch (const std::exception& err) {
@@ -1161,6 +1164,7 @@ int main(int argc, const char* argv[]) {
 	std::string sblPath;
 	common::CarPlatform carPlatform = common::CarPlatform::Undefined;
 	uint64_t pin = 0;
+	bool pinSpecified = false;
 	unsigned long start = 0;
 	unsigned long datasize = 0;
 	uint8_t ecuId = 0;
@@ -1178,7 +1182,7 @@ int main(int argc, const char* argv[]) {
 	bool noSblAuth = false;
 	bool skipFallAsleep = false;
 	const auto devices = common::getAvailableDevices();
-	if (getRunOptions(argc, argv, deviceName, baudrate, flashPath, pin, ecuId, start, datasize,
+	if (getRunOptions(argc, argv, deviceName, baudrate, flashPath, pin, pinSpecified, ecuId, start, datasize,
 		runMode, sblPath, carPlatform, scanPinsUpward, resetFunctional, programHoldSeconds, flashProgramMode,
 		readFormat, rawData, noWakeup, attachRunningSbl,
 		udsRawWake, udsRawSession, noSblAuth, skipFallAsleep)) {
@@ -1223,6 +1227,24 @@ int main(int argc, const char* argv[]) {
 			}
 			catch (const std::exception& ex) {
 				LOG(INFO) << "resolved-target banner skipped: " << ex.what();
+			}
+			// If no --pin was given, fall back to a publicly known SecurityAccess PIN for the
+			// target ECU from the configuration. --pin always wins; the config value only fills
+			// the gap for read/flash/raw against an ECU that has a known key.
+			if (!pinSpecified
+				&& (runMode == RunMode::Read || runMode == RunMode::Flash || runMode == RunMode::UdsRaw)) {
+				try {
+					const auto ecuInfo{ common::getEcuInfoByEcuId(carPlatform, ecuId) };
+					const auto& targetEcu = std::get<1>(ecuInfo);
+					if (targetEcu.hasSecurityPin()) {
+						pin = common::securityPinToUint64(targetEcu.securityPin);
+						LOG(INFO) << "using known PIN from configuration for " << targetEcu.name;
+						std::cout << "Using known PIN from configuration for " << targetEcu.name << std::endl;
+					}
+				}
+				catch (const std::exception& ex) {
+					LOG(INFO) << "known-PIN lookup skipped: " << ex.what();
+				}
 			}
 			if (runMode == RunMode::Wakeup) {
 				UDSWakeup(carPlatform, ecuId, *j2534);

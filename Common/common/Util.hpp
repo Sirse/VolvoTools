@@ -152,6 +152,19 @@ namespace common {
 
     std::array<uint8_t, 5> getPinArray(uint64_t pin);
 
+    // Parses a SecurityAccess PIN given as 5 hex bytes, either "AA BB CC DD EE" or "AABBCCDDEE".
+    // Returns the bytes big-endian (byte[0] is the most significant), ready to feed authorize.
+    // Throws std::runtime_error on malformed input. A 5-byte key does not fit a uint32 --pin, so
+    // this must never round-trip through getPinArray.
+    std::array<uint8_t, 5> parseSecurityPin(const std::string& hex);
+
+    // True when any of the 5 bytes is non-zero (i.e. a real key, not the "no key" sentinel).
+    bool hasSecurityPin(const std::array<uint8_t, 5>& pin);
+
+    // Interprets the 5-byte big-endian array as an unsigned integer. 5 bytes = 40 bits fits a
+    // uint64, so this is the numeric starting point for the PIN bruteforcer.
+    uint64_t securityPinToUint64(const std::array<uint8_t, 5>& pin);
+
     void initLogger(const std::string& logFilename, bool debugLogging = false);
 
     uint16_t crc16(const uint8_t* data_p, size_t length);
