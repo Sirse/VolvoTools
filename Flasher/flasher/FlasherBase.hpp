@@ -3,7 +3,6 @@
 #include "FlasherState.hpp"
 #include "SBLProviderBase.hpp"
 
-#include <common/compression/CompressorBase.hpp>
 #include <common/encryption/EncryptorBase.hpp>
 #include <common/J2534ChannelProvider.hpp>
 
@@ -24,7 +23,6 @@ struct FlasherParameters {
     std::string additionalData;
     std::shared_ptr<SBLProviderBase> sblProvider;
     const common::VBF flash;
-    std::unique_ptr<common::CompressorBase> compressor;
     std::unique_ptr<common::EncryptorBase> encryptor;
 };
 

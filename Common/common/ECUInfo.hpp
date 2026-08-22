@@ -1,6 +1,6 @@
 #pragma once
 
-#include "compression/CompressionType.hpp"
+#include "CompressionType.hpp"
 #include "encryption/EncryptionType.hpp"
 
 #include <array>
