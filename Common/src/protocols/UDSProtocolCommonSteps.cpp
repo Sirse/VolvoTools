@@ -287,22 +287,26 @@ namespace common {
 	bool UDSProtocolCommonSteps::authorizeWithRetry(const j2534::J2534Channel& channel, uint32_t canId,
 		const std::array<uint8_t, 5>& pin)
 	{
-        for (size_t attempt = 1; attempt <= 5; ++attempt) {
-            switch (authorize(channel, canId, pin)) {
-            case AuthResult::Unlocked:
-                return true;
-            case AuthResult::WrongKey:
-                // A wrong known PIN stays wrong; no amount of retrying fixes it.
-                return false;
-            case AuthResult::TransientError:
-                if (attempt < 5) {
-                    std::this_thread::sleep_for(std::chrono::seconds(5));
-                }
-                break;
-            }
-        }
-        LOG(INFO) << "authorization failed, pin=" << pinToHexString(pin);
-        return false;
+		// Known-PIN unlock backoff: a couple of quick retries for flaky buses. Seconds-long
+		// sleeps must stay out of SecurityAccess paths - this function runs inside flash/read
+		// sessions where a stall is just a stall.
+		constexpr size_t kMaxAttempts = 3;
+		for (size_t attempt = 1; attempt <= kMaxAttempts; ++attempt) {
+			switch (authorize(channel, canId, pin)) {
+			case AuthResult::Unlocked:
+				return true;
+			case AuthResult::WrongKey:
+				// A wrong known PIN stays wrong; no amount of retrying fixes it.
+				return false;
+			case AuthResult::TransientError:
+				if (attempt < kMaxAttempts) {
+					std::this_thread::sleep_for(std::chrono::milliseconds(200));
+				}
+				break;
+			}
+		}
+		LOG(INFO) << "authorization failed, pin=" << pinToHexString(pin);
+		return false;
 	}
 
     bool finishTransfer(const j2534::J2534Channel& channel, uint32_t canId, uint16_t expectedCrc)

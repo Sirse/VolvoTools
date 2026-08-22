@@ -424,17 +424,21 @@ void findPin2(j2534::J2534& j2534, common::CarPlatform carPlatform, uint8_t ecuI
 		case common::UDSPinFinder::State::KeepAlive:
 			std::cout << "Start keep alive" << std::endl;
 			break;
-		case common::UDSPinFinder::State::Work:
-			if (!(currentPin & 0xFF)) {
-				const auto now = std::chrono::steady_clock::now();
-				uint64_t pinDiff = currentPin > savedPin ? currentPin - savedPin : savedPin - currentPin;
-				const auto elapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(now - savedTime).count();
-				const auto pinPerSec = elapsedMs > 0 ? pinDiff * 1000 / static_cast<uint64_t>(elapsedMs) : 0;
-				savedPin = currentPin;
-				savedTime = now;
-				std::cout << "Trying PIN " << std::hex << currentPin << ", " << std::dec << pinPerSec << " pins/sec" << std::endl;
+		case common::UDSPinFinder::State::Work: {
+			// Progress is throttled by wall time: the callback fires on every candidate,
+			// and printing per candidate would dominate the scan time.
+			const auto now = std::chrono::steady_clock::now();
+			if (now - savedTime < std::chrono::seconds(1)) {
+				break;
 			}
+			uint64_t pinDiff = currentPin > savedPin ? currentPin - savedPin : savedPin - currentPin;
+			const auto elapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(now - savedTime).count();
+			const auto pinPerSec = elapsedMs > 0 ? pinDiff * 1000 / static_cast<uint64_t>(elapsedMs) : 0;
+			savedPin = currentPin;
+			savedTime = now;
+			std::cout << "Trying PIN " << std::hex << currentPin << ", " << std::dec << pinPerSec << " pins/sec" << std::endl;
 			break;
+		}
 		}
 		}, upward ? common::UDSPinFinder::Direction::Up : common::UDSPinFinder::Direction::Down, startPin,
 		window.value_or(common::PinSearchWindow{}));
