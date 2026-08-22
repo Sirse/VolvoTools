@@ -14,12 +14,14 @@ namespace common {
     struct FinderData {
         FinderData(const CarPlatform carPlatform, const uint8_t ecuId,
             const std::function<void(UDSPinFinder::State, uint64_t)> stateCallback,
-            const UDSPinFinder::Direction direction, const uint64_t startPin)
+            const UDSPinFinder::Direction direction, const uint64_t startPin,
+            const PinSearchWindow window)
             : carPlatform{ carPlatform }
             , ecuId{ ecuId }
             , stateCallback{ stateCallback }
             , direction{ direction }
             , startPin{ startPin }
+            , window{ window }
         {
         }
 
@@ -28,6 +30,8 @@ namespace common {
         const std::function<void(UDSPinFinder::State, uint64_t)> stateCallback;
         const UDSPinFinder::Direction direction;
         const uint64_t startPin;
+        // Bounds of the scan; unset sides mean unbounded (expert manual scan).
+        const PinSearchWindow window;
     };
 
     class UDSPinFinderImpl {
@@ -90,7 +94,14 @@ namespace common {
             auto& channel{ getChannelByEcuId(_finderData.carPlatform, _finderData.ecuId, _channels) };
 
             if (!UDSProtocolCommonSteps::authorize(channel, _canId, getPinArray(_currentPin))) {
-                _currentPin += _finderData.direction == UDSPinFinder::Direction::Up ? 1 : -1;
+                const auto next{ _finderData.window.nextCandidate(_currentPin,
+                    _finderData.direction == UDSPinFinder::Direction::Up) };
+                if (!next) {
+                    // The window is scanned through without a hit. Finish as a normal Done
+                    // (no found pin), not as an error - the search simply found nothing.
+                    return true;
+                }
+                _currentPin = *next;
                 return false;
             }
             else {
@@ -293,9 +304,10 @@ namespace common {
 
     UDSPinFinder::UDSPinFinder(j2534::J2534& j2534, CarPlatform carPlatform, uint8_t ecuId,
         const std::function<void(State, uint64_t)> stateCallback,
-        Direction direction, uint64_t startPin)
+        Direction direction, uint64_t startPin, PinSearchWindow window)
         : _channelProvider{ j2534, carPlatform }
-        , _data{ std::make_unique<FinderData>(carPlatform, ecuId, stateCallback, direction, startPin) }
+        , _data{ std::make_unique<FinderData>(carPlatform, ecuId, stateCallback, direction, startPin,
+              window) }
         , _thread{}
     {
     }

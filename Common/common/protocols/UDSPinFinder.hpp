@@ -1,6 +1,7 @@
 #pragma once
 
 #include <common/J2534ChannelProvider.hpp>
+#include <common/protocols/PinSearch.hpp>
 
 #include <functional>
 #include <mutex>
@@ -28,7 +29,8 @@ public:
 
     explicit UDSPinFinder(j2534::J2534& j2534, CarPlatform carPlatform, uint8_t ecuId,
         const std::function<void(State, uint64_t)> stateCallback,
-        Direction direction = Direction::Up, uint64_t startPin = 0);
+        Direction direction = Direction::Up, uint64_t startPin = 0,
+        PinSearchWindow window = {});
     ~UDSPinFinder();
 
     State getCurrentState() const;

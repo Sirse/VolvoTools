@@ -29,6 +29,7 @@
 #include <fstream>
 #include <iostream>
 #include <iterator>
+#include <optional>
 #include <thread>
 #include <chrono>
 #include <iomanip>
@@ -154,7 +155,8 @@ bool getRunOptions(int argc, const char* argv[], std::string& deviceName,
 	bool& pinUpward, bool& resetFunctional, unsigned long& programHoldSeconds,
 	ProgramMode& flashProgramMode, ReadFormat& readFormat,
 	std::vector<std::string>& rawData, bool& noWakeup, bool& attachRunningSbl,
-	bool& udsRawWake, uint8_t& udsRawSession, bool& noSblAuth, bool& skipFallAsleep) {
+	bool& udsRawWake, uint8_t& udsRawSession, bool& noSblAuth, bool& skipFallAsleep,
+	common::PinSearchWindow& pinWindow, bool& pinWindowSet) {
 	argparse::ArgumentParser program("VolvoFlasher", "1.0", argparse::default_arguments::help);
     const auto addDebugArgument = [](argparse::ArgumentParser& parser) {
         parser.add_argument("--debug").default_value(false).implicit_value(true).nargs(0)
@@ -200,6 +202,10 @@ bool getRunOptions(int argc, const char* argv[], std::string& deviceName,
     addDebugArgument(pin_command);
 	pin_command.add_description("Bruteforce ECM PIN code. If you provide -p argument then program starts from providen PIN");
 	pin_command.add_argument("-d", "--down").default_value(false).implicit_value(true).nargs(0).help("Scan pins downward");
+	pin_command.add_argument("--floor").scan<'x', unsigned long long>()
+		.help("Explicit scan window lower bound, hex (e.g. 0xffff000000)");
+	pin_command.add_argument("--ceil").scan<'x', unsigned long long>()
+		.help("Explicit scan window upper bound, hex (e.g. 0xffffffffff)");
 
 	argparse::ArgumentParser wakeup_command("wakeup", "1.0", argparse::default_arguments::help);
     addDebugArgument(wakeup_command);
@@ -267,6 +273,15 @@ bool getRunOptions(int argc, const char* argv[], std::string& deviceName,
 		}
 		else if (program.is_subcommand_used(pin_command)) {
 			pinUpward = !pin_command.get<bool>("-d");
+			const auto floorArg = pin_command.present<unsigned long long>("--floor");
+			const auto ceilArg = pin_command.present<unsigned long long>("--ceil");
+			if (floorArg) {
+				pinWindow.floorPin = *floorArg;
+			}
+			if (ceilArg) {
+				pinWindow.ceilPin = *ceilArg;
+			}
+			pinWindowSet = floorArg.has_value() || ceilArg.has_value();
 			runMode = RunMode::Pin;
 		}
 		else if (program.is_subcommand_used(wakeup_command)) {
@@ -395,7 +410,9 @@ private:
     size_t _lastPercent{std::numeric_limits<size_t>::max()};
 };
 
-void findPin2(j2534::J2534& j2534, common::CarPlatform carPlatform, uint8_t ecuId, uint64_t startPin = 0, bool upward = true)
+void findPin2(j2534::J2534& j2534, common::CarPlatform carPlatform, uint8_t ecuId,
+	uint64_t startPin = 0, bool upward = true,
+	std::optional<common::PinSearchWindow> window = {})
 {
 	std::chrono::time_point savedTime = std::chrono::steady_clock::now();
 	uint64_t savedPin = startPin;
@@ -419,7 +436,8 @@ void findPin2(j2534::J2534& j2534, common::CarPlatform carPlatform, uint8_t ecuI
 			}
 			break;
 		}
-		}, upward ? common::UDSPinFinder::Direction::Up : common::UDSPinFinder::Direction::Down, startPin);
+		}, upward ? common::UDSPinFinder::Direction::Up : common::UDSPinFinder::Direction::Down, startPin,
+		window.value_or(common::PinSearchWindow{}));
 
 	if (!pinFinder.start()) {
 		std::cout << "Failed to start PIN finder" << std::endl;
@@ -1181,11 +1199,13 @@ int main(int argc, const char* argv[]) {
 	uint8_t udsRawSession = 0;
 	bool noSblAuth = false;
 	bool skipFallAsleep = false;
+	common::PinSearchWindow pinWindow;
+	bool pinWindowSet = false;
 	const auto devices = common::getAvailableDevices();
 	if (getRunOptions(argc, argv, deviceName, baudrate, flashPath, pin, pinSpecified, ecuId, start, datasize,
 		runMode, sblPath, carPlatform, scanPinsUpward, resetFunctional, programHoldSeconds, flashProgramMode,
 		readFormat, rawData, noWakeup, attachRunningSbl,
-		udsRawWake, udsRawSession, noSblAuth, skipFallAsleep)) {
+		udsRawWake, udsRawSession, noSblAuth, skipFallAsleep, pinWindow, pinWindowSet)) {
 		j2534::DeviceInfo device;
 		try {
 			device = common::selectSingleDevice(devices, deviceName);
@@ -1250,7 +1270,20 @@ int main(int argc, const char* argv[]) {
 				UDSWakeup(carPlatform, ecuId, *j2534);
 			}
 			else if (runMode == RunMode::Pin) {
-				findPin2(*j2534, carPlatform, ecuId, pin, scanPinsUpward);
+				if (!pinSpecified && pinWindowSet) {
+					// Expert explicit window without a start PIN: sweep it top-down.
+					const auto start = pinWindow.ceilPin ? *pinWindow.ceilPin : *pinWindow.floorPin;
+					findPin2(*j2534, carPlatform, ecuId, start, false, pinWindow);
+				}
+				else if (pinSpecified) {
+					findPin2(*j2534, carPlatform, ecuId, pin, scanPinsUpward, pinWindow);
+				}
+				else {
+					// Default CEM online search: the FFFF-prefixed window swept downward from
+					// its top; the scan stops at the floor instead of running away below it.
+					findPin2(*j2534, carPlatform, ecuId, common::kCemPinWindowCeil, false,
+						common::PinSearchWindow{ common::kCemPinWindowFloor, common::kCemPinWindowCeil });
+				}
 			}
 			else if (runMode == RunMode::Read) {
 				readFlash(std::move(j2534), carPlatform, ecuId, flashPath, start, datasize,
