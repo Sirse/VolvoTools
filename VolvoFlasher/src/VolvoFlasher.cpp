@@ -200,7 +200,13 @@ bool getRunOptions(int argc, const char* argv[], std::string& deviceName,
 
 	argparse::ArgumentParser pin_command("pin", "1.0", argparse::default_arguments::help);
     addDebugArgument(pin_command);
-	pin_command.add_description("Bruteforce ECM PIN code. If you provide -p argument then program starts from providen PIN");
+	pin_command.add_description(
+		"Bruteforce ECM/CEM SecurityAccess PIN.\n"
+		"By default the CEM online search is run: it scans the window 0xFFFF000000..0xFFFFFFFFFF\n"
+		"downward, looking for a 3-byte hex key collision (2^24 candidates, typically hours).\n"
+		"The found value has the form FFFFxxxxxx - it is NOT the factory PIN from a CEM dump;\n"
+		"it only unlocks this ECU over SecurityAccess. -p/-d/--floor/--ceil switch to an expert\n"
+		"manual scan from an explicit start value and/or explicit window.");
 	pin_command.add_argument("-d", "--down").default_value(false).implicit_value(true).nargs(0).help("Scan pins downward");
 	pin_command.add_argument("--floor").scan<'x', unsigned long long>()
 		.help("Explicit scan window lower bound, hex (e.g. 0xffff000000)");
