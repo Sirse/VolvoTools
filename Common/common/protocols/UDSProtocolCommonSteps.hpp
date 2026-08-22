@@ -1,6 +1,7 @@
 #pragma once
 
 #include "common/VBF.hpp"
+#include "common/protocols/PinSearch.hpp"
 #include "common/protocols/UploadIntegrity.hpp"
 
 #include <j2534/J2534.hpp>
@@ -42,7 +43,19 @@ namespace common {
 		// modules back to normal operation - it resets them, it does not wake anything up.
 		// Subfunction 0x11 is not an ISO 14229 one; treat it as Volvo-specific and unverified.
 		static void broadcastEcuReset(const std::vector<std::unique_ptr<j2534::J2534Channel>>& channels);
-		static bool authorize(const j2534::J2534Channel& channel, uint32_t canId, const std::array<uint8_t, 5>& pin);
+		// One SecurityAccess attempt with the given PIN: 27 01 seed, generateKey, 27 02 key.
+		// The tri-state result separates a rejected key (7F 27 35 - definitive, the candidate
+		// is wrong) from a bus-level failure (timeout/TX error/other NRC - says nothing about
+		// the key, so an online search must repeat the same candidate after reinit). Never
+		// sleeps and never retries internally; backoff/retry policy belongs to the caller.
+		static AuthResult authorize(const j2534::J2534Channel& channel, uint32_t canId,
+			const std::array<uint8_t, 5>& pin);
+		// Known-PIN unlock: same request sequence, but the outcome collapses to success/fail.
+		// Transient failures are retried a few times with a delay; a rejected key fails fast -
+		// retrying a wrong key cannot fix it. This keeps the old authorize() contract for the
+		// flash/read/raw callers that unlock with a known PIN.
+		static bool authorizeWithRetry(const j2534::J2534Channel& channel, uint32_t canId,
+			const std::array<uint8_t, 5>& pin);
         static bool transferData(const j2534::J2534Channel& channel, uint32_t canId, const VBF& data,
                                  const std::function<void(size_t)>& progressCallback);
         static bool transferChunk(const j2534::J2534Channel& channel, uint32_t canId, const VBFChunk& chunk,

@@ -405,7 +405,7 @@ void runScriptScenario(const std::vector<j2534::DeviceInfo>& devices, const RunO
             if (bytes.size() != 5) throw std::runtime_error("Security PIN must contain exactly 5 bytes");
             std::array<uint8_t, 5> pinArray{};
             std::copy(bytes.begin(), bytes.end(), pinArray.begin());
-            if (!common::UDSProtocolCommonSteps::authorize(*channel, canId, pinArray)) throw std::runtime_error("SecurityAccess authorization failed");
+            if (!common::UDSProtocolCommonSteps::authorizeWithRetry(*channel, canId, pinArray)) throw std::runtime_error("SecurityAccess authorization failed");
         }
         auto sendTesterPresent = [&]() {
             if (scenario.testerPresentSuppress) {

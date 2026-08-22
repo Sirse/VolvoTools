@@ -3,9 +3,12 @@
 #include <gtest/gtest.h>
 
 #include <cstdint>
+#include <vector>
 
 using common::kCemPinWindowCeil;
 using common::kCemPinWindowFloor;
+using common::AuthResult;
+using common::PinSearchDispatcher;
 using common::PinSearchWindow;
 
 namespace {
@@ -78,4 +81,82 @@ TEST(PinSearchWindow, StartOutsideWindowExhaustsOnFirstAdvance)
     // A manual start below the floor has nothing left to visit going downward.
     EXPECT_FALSE(cem.nextCandidate(kCemPinWindowFloor - 1, false).has_value());
     EXPECT_FALSE(cem.nextCandidate(kCemPinWindowCeil + 1, true).has_value());
+}
+
+// ---- dispatcher: wrong key / transient failure / success -------------------
+
+namespace {
+
+// Feeds a scripted sequence of outcomes to the dispatcher and collects the actions.
+std::vector<PinSearchDispatcher::Action> feed(PinSearchDispatcher& d,
+    const std::vector<AuthResult>& script)
+{
+    std::vector<PinSearchDispatcher::Action> actions;
+    for (const auto result : script) {
+        actions.push_back(d.step(result));
+    }
+    return actions;
+}
+
+} // namespace
+
+TEST(PinSearchDispatcher, WrongKeyAdvancesCandidate)
+{
+    PinSearchDispatcher d{ { kCemPinWindowFloor, kCemPinWindowCeil }, false,
+        kCemPinWindowCeil };
+    EXPECT_EQ(d.currentPin(), kCemPinWindowCeil);
+    EXPECT_EQ(d.step(AuthResult::WrongKey), PinSearchDispatcher::Action::Continue);
+    EXPECT_EQ(d.currentPin(), kCemPinWindowCeil - 1);
+}
+
+TEST(PinSearchDispatcher, TransientErrorRepeatsSameCandidate)
+{
+    PinSearchDispatcher d{ {}, true, 100 };
+    EXPECT_EQ(d.step(AuthResult::TransientError),
+        PinSearchDispatcher::Action::RetrySameCandidate);
+    // A bus failure says nothing about the key: the candidate must not be skipped.
+    EXPECT_EQ(d.currentPin(), 100u);
+}
+
+TEST(PinSearchDispatcher, ConsecutiveTransientsGiveUp)
+{
+    PinSearchDispatcher d{ {}, true, 100, /*maxConsecutiveTransientErrors=*/3 };
+    EXPECT_EQ(feed(d, { AuthResult::TransientError, AuthResult::TransientError }),
+        (std::vector<PinSearchDispatcher::Action>{
+            PinSearchDispatcher::Action::RetrySameCandidate,
+            PinSearchDispatcher::Action::RetrySameCandidate }));
+    EXPECT_EQ(d.step(AuthResult::TransientError), PinSearchDispatcher::Action::GiveUp);
+}
+
+TEST(PinSearchDispatcher, SuccessfulAttemptResetsTransientStreak)
+{
+    PinSearchDispatcher d{ {}, true, 100, /*maxConsecutiveTransientErrors=*/2 };
+    EXPECT_EQ(d.step(AuthResult::TransientError),
+        PinSearchDispatcher::Action::RetrySameCandidate);
+    EXPECT_EQ(d.step(AuthResult::WrongKey), PinSearchDispatcher::Action::Continue);
+    // The streak was reset by the wrong-key verdict, so one more transient is survivable.
+    EXPECT_EQ(d.step(AuthResult::TransientError),
+        PinSearchDispatcher::Action::RetrySameCandidate);
+    EXPECT_EQ(d.currentPin(), 101u);
+}
+
+TEST(PinSearchDispatcher, UnlockedFinishesWithTheTriedCandidate)
+{
+    PinSearchDispatcher d{ { kCemPinWindowFloor, kCemPinWindowCeil }, false,
+        kCemPinWindowCeil - 5 };
+    ASSERT_EQ(d.step(AuthResult::WrongKey), PinSearchDispatcher::Action::Continue);
+    ASSERT_EQ(d.step(AuthResult::TransientError),
+        PinSearchDispatcher::Action::RetrySameCandidate);
+    EXPECT_EQ(d.step(AuthResult::Unlocked), PinSearchDispatcher::Action::Found);
+    EXPECT_EQ(d.currentPin(), kCemPinWindowCeil - 6);
+}
+
+TEST(PinSearchDispatcher, LastWindowCandidateRejectEndsScanAsExhausted)
+{
+    PinSearchDispatcher d{ { kCemPinWindowFloor, kCemPinWindowCeil }, false,
+        kCemPinWindowFloor + 1 };
+    EXPECT_EQ(d.step(AuthResult::WrongKey), PinSearchDispatcher::Action::Continue);
+    EXPECT_EQ(d.currentPin(), kCemPinWindowFloor);
+    // The floor itself was still tried; stepping below it is the not-found verdict.
+    EXPECT_EQ(d.step(AuthResult::WrongKey), PinSearchDispatcher::Action::Exhausted);
 }

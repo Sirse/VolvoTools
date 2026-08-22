@@ -90,7 +90,7 @@ namespace flasher {
             catch (const std::exception& ex) {
                 LOG(WARNING) << "Programming session request before authorize failed: " << ex.what();
             }
-            if (!common::UDSProtocolCommonSteps::authorize(channel, _canId, _udsFlasherParameters.pin)) {
+            if (!common::UDSProtocolCommonSteps::authorizeWithRetry(channel, _canId, _udsFlasherParameters.pin)) {
                 setFailed("Authorization failed");
             }
         }
@@ -218,7 +218,7 @@ namespace flasher {
     private:
         bool authorizeRunningSbl(const j2534::J2534Channel& channel)
         {
-            return common::UDSProtocolCommonSteps::authorize(channel, _canId, _udsFlasherParameters.pin);
+            return common::UDSProtocolCommonSteps::authorizeWithRetry(channel, _canId, _udsFlasherParameters.pin);
         }
 
         void setFailed(const std::string& message)

@@ -41,6 +41,10 @@ namespace common {
             return std::get<1>(ecuInfo).canId;
         }
 
+        // A dead bus must not spin forever: after this many consecutive transient failures
+        // the search gives up with an error instead of looping on one candidate.
+        static constexpr size_t kMaxConsecutiveTransientErrors = 3;
+
     public:
         UDSPinFinderImpl(const std::vector<std::unique_ptr<j2534::J2534Channel>>& channels,
             const FinderData& finderData)
@@ -48,7 +52,9 @@ namespace common {
             , _finderData{ finderData }
             , _canId{ getCanId(finderData) }
             , _currentState{ UDSPinFinder::State::Initial }
-            , _currentPin{ finderData.startPin }
+            , _dispatcher{ finderData.window,
+                  finderData.direction == UDSPinFinder::Direction::Up, finderData.startPin,
+                  kMaxConsecutiveTransientErrors }
             , _stop{ false }
             , _isFailed{ false }
         {
@@ -93,19 +99,29 @@ namespace common {
             setCurrentState(UDSPinFinder::State::Work);
             auto& channel{ getChannelByEcuId(_finderData.carPlatform, _finderData.ecuId, _channels) };
 
-            if (!UDSProtocolCommonSteps::authorize(channel, _canId, getPinArray(_currentPin))) {
-                const auto next{ _finderData.window.nextCandidate(_currentPin,
-                    _finderData.direction == UDSPinFinder::Direction::Up) };
-                if (!next) {
-                    // The window is scanned through without a hit. Finish as a normal Done
-                    // (no found pin), not as an error - the search simply found nothing.
+            const auto result{ UDSProtocolCommonSteps::authorize(channel, _canId,
+                getPinArray(_dispatcher.currentPin())) };
+            switch (_dispatcher.step(result)) {
+            case PinSearchDispatcher::Action::Continue:
+                return false;
+            case PinSearchDispatcher::Action::Found:
+                _foundPin = _dispatcher.currentPin();
+                return true;
+            case PinSearchDispatcher::Action::Exhausted:
+                // The window is scanned through without a hit. Finish as a normal Done
+                // (no found pin), not as an error - the search simply found nothing.
+                return true;
+            case PinSearchDispatcher::Action::RetrySameCandidate:
+                // Bus-level failure says nothing about the key: reinit the session and
+                // repeat the same candidate instead of silently skipping it.
+                if (!UDSProtocolCommonSteps::broadcastProgrammingSessionPrelude(_channels)) {
+                    setFailed();
                     return true;
                 }
-                _currentPin = *next;
                 return false;
-            }
-            else {
-                _foundPin = _currentPin;
+            case PinSearchDispatcher::Action::GiveUp:
+            default:
+                setFailed();
                 return true;
             }
         }
@@ -156,12 +172,11 @@ namespace common {
         void callCallback()
         {
             UDSPinFinder::State currentState;
-            uint64_t currentPin;
             {
                 std::unique_lock<std::mutex> lock{ _mutex };
                 currentState = _currentState;
-                currentPin = _currentPin;
             }
+            const auto currentPin{ _dispatcher.currentPin() };
             if (_finderData.stateCallback) {
                 _finderData.stateCallback(currentState, currentPin);
             }
@@ -178,7 +193,8 @@ namespace common {
         uint32_t _canId;
         UDSPinFinder::State _currentState;
         mutable std::mutex _mutex;
-        uint64_t _currentPin;
+        // Owns the scan position; only mutated on the FSM thread.
+        PinSearchDispatcher _dispatcher;
         bool _stop;
         bool _isFailed;
         std::optional<uint64_t> _foundPin;

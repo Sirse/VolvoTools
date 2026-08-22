@@ -709,7 +709,7 @@ void UDSRaw(common::CarPlatform carPlatform, uint8_t ecuId, j2534::J2534& j2534,
 			throw std::runtime_error("SBL programming-session broadcast failed");
 		}
 		common::UDSProtocolCommonSteps::keepAlive(channel);
-		if (!common::UDSProtocolCommonSteps::authorize(channel, canId, common::getPinArray(pin))) {
+		if (!common::UDSProtocolCommonSteps::authorizeWithRetry(channel, canId, common::getPinArray(pin))) {
 			throw std::runtime_error("SBL security access failed");
 		}
 		common::VBFParser vbfParser;

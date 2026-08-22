@@ -235,41 +235,70 @@ namespace common {
         return;
 	}
 
-	bool UDSProtocolCommonSteps::authorize(const j2534::J2534Channel& channel, uint32_t canId,
+	AuthResult UDSProtocolCommonSteps::authorize(const j2534::J2534Channel& channel, uint32_t canId,
 		const std::array<uint8_t, 5>& pin)
 	{
         LOG(INFO) << "authorize enter pin=" << pinToHexString(pin);
         UDSRequest seedRequest(canId, { 0x27, 0x01 });
-        for(size_t i = 0; i < 5; ++i) {
-            try {
-                channel.clearRx();
-                const auto seedResponse(seedRequest.process(channel));
-                if (seedResponse.size() < 9)
-                    return false;
-                std::array<uint8_t, 3> seed = { seedResponse[6], seedResponse[7], seedResponse[8] };
-                uint32_t key = generateKey(pin, seed);
-                channel.clearRx();
-                UDSRequest keyRequest(canId, { 0x27, 0x02, (key >> 16) & 0xFF, (key >> 8) & 0xFF, key & 0xFF });
-                try {
-                    const auto keyResponse(keyRequest.process(channel));
-                    const bool result = keyResponse.size() >= 6 && keyResponse[5] == 0x02;
-                    if(!result) {
-                        LOG(ERROR) << "authorize wrong pin, pin=" << pinToHexString(pin);
-                    }
-                    else {
-                        LOG(INFO) << "authorize success, pin=" << pinToHexString(pin);
-                    }
-                    return result;
-                }
-                catch(UDSError& error) {
-                    if(error.getErrorCode() == UDSError::ErrorCode::RequiredTimeDelayHasNotExpired) {
-                    }
-                    LOG(ERROR) << "authorize error: " << error.what() << ", pin = "
-                               << pinToHexString(pin);
-                }
+        try {
+            channel.clearRx();
+            const auto seedResponse(seedRequest.process(channel));
+            if (seedResponse.size() < 9) {
+                LOG(ERROR) << "authorize short seed response (" << std::dec << seedResponse.size()
+                           << " bytes), pin=" << pinToHexString(pin);
+                return AuthResult::TransientError;
             }
-            catch (...) {
-                std::this_thread::sleep_for(std::chrono::seconds(5));
+            std::array<uint8_t, 3> seed = { seedResponse[6], seedResponse[7], seedResponse[8] };
+            uint32_t key = generateKey(pin, seed);
+            channel.clearRx();
+            UDSRequest keyRequest(canId, { 0x27, 0x02, (key >> 16) & 0xFF, (key >> 8) & 0xFF, key & 0xFF });
+            try {
+                const auto keyResponse(keyRequest.process(channel));
+                if (keyResponse.size() >= 6 && keyResponse[5] == 0x02) {
+                    LOG(INFO) << "authorize success, pin=" << pinToHexString(pin);
+                    return AuthResult::Unlocked;
+                }
+                LOG(ERROR) << "authorize unexpected key response (" << toHexString(keyResponse)
+                           << "), pin=" << pinToHexString(pin);
+                return AuthResult::TransientError;
+            }
+            catch(const UDSError& error) {
+                if (error.getErrorCode() == UDSError::ErrorCode::InvalidKey) {
+                    // Definitive verdict: the ECU understood the request and rejected the key.
+                    LOG(ERROR) << "authorize invalid key (7F 27 35), pin=" << pinToHexString(pin);
+                    return AuthResult::WrongKey;
+                }
+                LOG(ERROR) << "authorize error: " << error.what() << ", pin = "
+                           << pinToHexString(pin);
+                return AuthResult::TransientError;
+            }
+        }
+        catch (const std::exception& ex) {
+            LOG(ERROR) << "authorize transient failure: " << ex.what()
+                       << ", pin=" << pinToHexString(pin);
+            return AuthResult::TransientError;
+        }
+        catch (...) {
+            LOG(ERROR) << "authorize transient failure, pin=" << pinToHexString(pin);
+            return AuthResult::TransientError;
+        }
+	}
+
+	bool UDSProtocolCommonSteps::authorizeWithRetry(const j2534::J2534Channel& channel, uint32_t canId,
+		const std::array<uint8_t, 5>& pin)
+	{
+        for (size_t attempt = 1; attempt <= 5; ++attempt) {
+            switch (authorize(channel, canId, pin)) {
+            case AuthResult::Unlocked:
+                return true;
+            case AuthResult::WrongKey:
+                // A wrong known PIN stays wrong; no amount of retrying fixes it.
+                return false;
+            case AuthResult::TransientError:
+                if (attempt < 5) {
+                    std::this_thread::sleep_for(std::chrono::seconds(5));
+                }
+                break;
             }
         }
         LOG(INFO) << "authorization failed, pin=" << pinToHexString(pin);

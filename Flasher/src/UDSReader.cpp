@@ -118,7 +118,7 @@ void UDSReader::startImpl(std::vector<std::unique_ptr<j2534::J2534Channel>>& cha
             }
             else {
                 setCurrentState(FlasherState::Authorize);
-                if (!common::UDSProtocolCommonSteps::authorize(channel, canId, _udsReaderParameters.pin)) {
+                if (!common::UDSProtocolCommonSteps::authorizeWithRetry(channel, canId, _udsReaderParameters.pin)) {
                     setFailure("Running SBL authorization failed", errorUpdater);
                 }
             }
@@ -134,7 +134,7 @@ void UDSReader::startImpl(std::vector<std::unique_ptr<j2534::J2534Channel>>& cha
             catch (const std::exception& ex) {
                 LOG(WARNING) << "Programming session request before authorize failed: " << ex.what();
             }
-            if (!common::UDSProtocolCommonSteps::authorize(channel, canId, _udsReaderParameters.pin)) {
+            if (!common::UDSProtocolCommonSteps::authorizeWithRetry(channel, canId, _udsReaderParameters.pin)) {
                 setFailure("Authorization failed", errorUpdater);
             }
 
@@ -151,7 +151,7 @@ void UDSReader::startImpl(std::vector<std::unique_ptr<j2534::J2534Channel>>& cha
                 setFailure("Bootloader starting failed", errorUpdater);
             }
             if (!_udsReaderParameters.noSblAuth
-                && !common::UDSProtocolCommonSteps::authorize(channel, canId, _udsReaderParameters.pin)) {
+                && !common::UDSProtocolCommonSteps::authorizeWithRetry(channel, canId, _udsReaderParameters.pin)) {
                 setFailure("SBL post-start authorization failed", errorUpdater);
             }
         }
