@@ -10,6 +10,7 @@
 #pragma warning(pop)
 
 #include <cctype>
+#include <fstream>
 #include <limits>
 #include <numeric>
 #include <stdexcept>
@@ -141,7 +142,14 @@ namespace logger {
 	}
 
 	LogParameters::LogParameters(const std::string& path) {
-		io::CSVReader<11> reader{ path };
+		// Open through std::ifstream and hand the stream to the named-reader constructor:
+		// CSVReader's path constructor uses a narrow fopen, which cannot open non-ASCII
+		// (e.g. Cyrillic) paths on Windows. The ifstream constructor handles them natively.
+		std::ifstream stream(path);
+		if (!stream.is_open()) {
+			throw std::runtime_error("Cannot open log parameters file: " + path);
+		}
+		io::CSVReader<11> reader{ "log.params", stream };
 		load(reader);
 	}
 
