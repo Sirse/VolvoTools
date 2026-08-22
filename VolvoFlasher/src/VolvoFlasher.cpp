@@ -171,7 +171,11 @@ bool getRunOptions(int argc, const char* argv[], std::string& deviceName,
 
 	argparse::ArgumentParser flash_command("flash", "1.0", argparse::default_arguments::help);
     addDebugArgument(flash_command);
-	flash_command.add_description("Flash BIN to ECU");
+	flash_command.add_description(
+		"Flash BIN to ECU.\n"
+		"Interrupt policy: Ctrl+C aborts cleanly until erasing starts; once erase has begun\n"
+		"the operation ignores interruptions and runs to completion - stopping mid-write\n"
+		"would leave the ECU without a valid application.");
 	flash_command.add_argument("-i", "--input").help("File to flash");
 	flash_command.add_argument("-s", "--sbl").default_value(std::string()).help("File with SBL, required for UDS flashing");
 	flash_command.add_argument("--program-mode").required()

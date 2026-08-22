@@ -3,6 +3,7 @@
 #include <j2534/J2534.hpp>
 #include <j2534/J2534Channel.hpp>
 
+#include <common/CliSupport.hpp>
 #include <common/CommonData.hpp>
 #include <common/protocols/UDSProtocolCommonSteps.hpp>
 #include <common/protocols/UDSRequest.hpp>
@@ -10,6 +11,7 @@
 
 #include <easylogging++.h>
 
+#include <optional>
 #include <stdexcept>
 
 #define HFSM2_ENABLE_ALL
@@ -146,6 +148,11 @@ namespace flasher {
                     + "), unpacking is not implemented");
                 return;
             }
+            // From here on interruption cannot be made safe: erased flash leaves the ECU
+            // without a valid application. Swallow stop events and run erase/write/verify
+            // to completion; the region ends with this object, covering checkValidApplication
+            // and the FSM teardown states as well.
+            _destructiveRegion.emplace("ECU flashing (erase/write/verify)");
             _stateUpdater(FlasherState::EraseFlash);
             if (!common::UDSProtocolCommonSteps::eraseFlash(channel, _canId, _flasherParameters.flash)) {
                 setFailed("Flash erasing failed");
@@ -215,6 +222,14 @@ namespace flasher {
             return _isFailed;
         }
 
+        // Cooperative stop, honored only before the destructive phase: fails the plan so
+        // the FSM unwinds through its normal Finish/WakeUp(ECUReset) teardown. Once the
+        // uninterruptible region is active the console handler swallows Ctrl+C anyway.
+        void abortBeforeErasing()
+        {
+            setFailed("Stopped by user before erasing; no destructive step had been done");
+        }
+
     private:
         bool authorizeRunningSbl(const j2534::J2534Channel& channel)
         {
@@ -236,6 +251,9 @@ namespace flasher {
         const uint32_t _canId;
         bool _isFailed;
         std::string _errorMessage;
+        // Active from the first erase call until the whole flash run (including application
+        // validation and FSM teardown) has finished; see writeFlash().
+        std::optional<common::UninterruptibleRegion> _destructiveRegion;
         const std::function<void(FlasherState)> _stateUpdater;
         const std::function<void(size_t)> _progressUpdater;
         const std::function<void(const std::string&)> _errorUpdater;
@@ -435,6 +453,14 @@ using M = hfsm2::MachineT<hfsm2::Config::ContextT<UDSFlasherImpl&>>;
         FSM::Instance fsm{ impl };
 
         while(getCurrentState() != FlasherState::Done && getCurrentState() != FlasherState::Error) {
+            // A stop requested before any destructive step is a clean abort: fail the plan
+            // and let the FSM unwind through Finish/WakeUp(ECUReset) teardown. Once the
+            // destructive region is active the console handler swallows stop events anyway
+            // and the flash runs to completion by design.
+            if (!impl.isFailed() && !common::isUninterruptibleRegionActive()
+                && common::stopRequested.exchange(false)) {
+                impl.abortBeforeErasing();
+            }
             fsm.update();
         }
         LOG(INFO) << "UDSFlasher FSM exit, state=" << static_cast<int>(getCurrentState());

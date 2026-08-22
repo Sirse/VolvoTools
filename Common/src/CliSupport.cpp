@@ -24,19 +24,82 @@ namespace {
 // ordering is the invariant that keeps this single-writer global race-free.
 std::function<void()> stopCallback;
 
+// Uninterruptible region state. The reason pointer is published (release) before the
+// active flag flips on; the handler reads it only after an acquire-load of that flag.
+std::atomic<const char*> uninterruptibleReason{ nullptr };
+std::atomic_bool uninterruptibleActive{ false };
+
 BOOL WINAPI HandlerRoutine(_In_ DWORD ctrlType)
 {
     if (ctrlType == CTRL_C_EVENT || ctrlType == CTRL_BREAK_EVENT || ctrlType == CTRL_CLOSE_EVENT) {
-        const bool alreadyRequested = stopRequested.exchange(true);
-        if (stopCallback) {
-            stopCallback();
+        switch (decideCtrlAction(stopRequested.load(), isUninterruptibleRegionActive())) {
+        case StopDecision::Ignore: {
+            // Destructive phase in progress (e.g. flash erase/write): refuse and say why,
+            // on every press, so the user is not left guessing whether the key works.
+            const auto* reason = uninterruptibleReason.load(std::memory_order_acquire);
+            std::cerr << "\nInterrupt ignored: " << (reason && *reason ? reason : "critical operation")
+                      << " is in progress and will run to completion." << std::endl;
+            return TRUE;
         }
-        return alreadyRequested ? FALSE : TRUE;
+        case StopDecision::GracefulStop:
+            stopRequested.store(true);
+            if (stopCallback) {
+                stopCallback();
+            }
+            return TRUE;
+        case StopDecision::ForceKill:
+        default:
+            // The historical escape hatch outside critical regions: a repeated request
+            // hands control back to the OS to terminate the process immediately. Never
+            // reached while an uninterruptible region is active.
+            stopRequested.store(true);
+            if (stopCallback) {
+                stopCallback();
+            }
+            return FALSE;
+        }
     }
     return FALSE;
 }
 
 } // namespace
+
+StopDecision decideCtrlAction(bool alreadyRequested, bool uninterruptibleActive)
+{
+    if (uninterruptibleActive) {
+        return StopDecision::Ignore;
+    }
+    return alreadyRequested ? StopDecision::ForceKill : StopDecision::GracefulStop;
+}
+
+void beginUninterruptibleRegion(const char* reason)
+{
+    uninterruptibleReason.store(reason ? reason : "", std::memory_order_release);
+    uninterruptibleActive.store(true, std::memory_order_release);
+}
+
+void endUninterruptibleRegion()
+{
+    uninterruptibleActive.store(false, std::memory_order_release);
+    // Discard a stop request that raced into the flag just before the region began:
+    // nothing inside the region honors it, and a stale flag would leak into later phases.
+    stopRequested.store(false);
+}
+
+bool isUninterruptibleRegionActive()
+{
+    return uninterruptibleActive.load(std::memory_order_acquire);
+}
+
+UninterruptibleRegion::UninterruptibleRegion(const char* reason)
+{
+    beginUninterruptibleRegion(reason);
+}
+
+UninterruptibleRegion::~UninterruptibleRegion()
+{
+    endUninterruptibleRegion();
+}
 
 bool isDebugLoggingRequested(int argc, const char* argv[])
 {
