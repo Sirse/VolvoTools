@@ -43,6 +43,13 @@ namespace common {
 		// modules back to normal operation - it resets them, it does not wake anything up.
 		// Subfunction 0x11 is not an ISO 14229 one; treat it as Volvo-specific and unverified.
 		static void broadcastEcuReset(const std::vector<std::unique_ptr<j2534::J2534Channel>>& channels);
+		// The P3 SecurityAccess key derivation: a 32-round LFSR-ish fold of seed and PIN over
+		// the constants 0xC541A9 / 0x109028 plus a final nibble permutation, yielding a 24-bit
+		// key. Public so the reference seed->key pairs (confirmed against the P3Tool method_50
+		// implementation) are locked by unit tests - changing any constant or the permutation
+		// would silently break every online PIN search.
+		static uint32_t generateSecurityKey(const std::array<uint8_t, 5>& pin,
+			const std::array<uint8_t, 3>& seed);
 		// One SecurityAccess attempt with the given PIN: 27 01 seed, generateKey, 27 02 key.
 		// The tri-state result separates a rejected key (7F 27 35 - definitive, the candidate
 		// is wrong) from a bus-level failure (timeout/TX error/other NRC - says nothing about

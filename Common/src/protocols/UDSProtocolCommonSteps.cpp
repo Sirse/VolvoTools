@@ -30,18 +30,6 @@ namespace common {
 			return hash;
 		}
 
-		uint32_t generateKey(const std::array<uint8_t, 5>& pin_array, const std::array<uint8_t, 3>& seed_array)
-		{
-			const uint32_t high_part = pin_array[4] << 24 | pin_array[3] << 16 | pin_array[2] << 8 | pin_array[1];
-			const uint32_t low_part = pin_array[0] << 24 | seed_array[2] << 16 | seed_array[1] << 8 | seed_array[0];
-			unsigned int hash = 0xC541A9;
-			hash = generateKeyImpl(hash, low_part);
-			hash = generateKeyImpl(hash, high_part);
-			uint32_t result = ((hash & 0xF00000) >> 12) | hash & 0xF000 | (uint8_t)(16 * hash)
-				| ((hash & 0xFF0) << 12) | ((hash & 0xF0000) >> 16);
-			return result;
-		}
-
         std::string pinToHexString(const std::array<uint8_t, 5>& pin)
         {
             return toHexString({pin[0], pin[1], pin[2], pin[3], pin[4]});
@@ -235,6 +223,19 @@ namespace common {
         return;
 	}
 
+	uint32_t UDSProtocolCommonSteps::generateSecurityKey(const std::array<uint8_t, 5>& pin_array,
+		const std::array<uint8_t, 3>& seed_array)
+	{
+		const uint32_t high_part = pin_array[4] << 24 | pin_array[3] << 16 | pin_array[2] << 8 | pin_array[1];
+		const uint32_t low_part = pin_array[0] << 24 | seed_array[2] << 16 | seed_array[1] << 8 | seed_array[0];
+		unsigned int hash = 0xC541A9;
+		hash = generateKeyImpl(hash, low_part);
+		hash = generateKeyImpl(hash, high_part);
+		uint32_t result = ((hash & 0xF00000) >> 12) | hash & 0xF000 | (uint8_t)(16 * hash)
+			| ((hash & 0xFF0) << 12) | ((hash & 0xF0000) >> 16);
+		return result;
+	}
+
 	AuthResult UDSProtocolCommonSteps::authorize(const j2534::J2534Channel& channel, uint32_t canId,
 		const std::array<uint8_t, 5>& pin)
 	{
@@ -249,7 +250,7 @@ namespace common {
                 return AuthResult::TransientError;
             }
             std::array<uint8_t, 3> seed = { seedResponse[6], seedResponse[7], seedResponse[8] };
-            uint32_t key = generateKey(pin, seed);
+            uint32_t key = generateSecurityKey(pin, seed);
             channel.clearRx();
             UDSRequest keyRequest(canId, { 0x27, 0x02, (key >> 16) & 0xFF, (key >> 8) & 0xFF, key & 0xFF });
             try {

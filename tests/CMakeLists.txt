@@ -12,6 +12,7 @@ add_executable(VolvoToolsTests
     CliParserTests.cpp
     ScriptModelTests.cpp
     PinSearchTests.cpp
+    SecurityKeyTests.cpp
 )
 
 if (WIN32)
