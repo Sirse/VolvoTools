@@ -710,7 +710,10 @@ void UDSRaw(common::CarPlatform carPlatform, uint8_t ecuId, j2534::J2534& j2534,
 	if (!channels.front()) {
 		throw std::runtime_error("Failed to open J2534 channel for ECU");
 	}
-	auto& channel = *channels.front();
+	// Always fetched fresh from the vector: reopenRawUdsChannel may replace the channel
+	// object mid-session (post-start TX/RX failure), so a reference bound here once would
+	// dangle across the warmup path.
+	const auto currentChannel = [&channels]() -> j2534::J2534Channel& { return *channels.front(); };
 
 	if (!sblPath.empty()) {
 		LOG(INFO) << "UDS raw SBL session start sblPath=" << sblPath
@@ -722,8 +725,8 @@ void UDSRaw(common::CarPlatform carPlatform, uint8_t ecuId, j2534::J2534& j2534,
 		else if (!common::UDSProtocolCommonSteps::broadcastProgrammingSessionPrelude(channels)) {
 			throw std::runtime_error("SBL programming-session broadcast failed");
 		}
-		common::UDSProtocolCommonSteps::keepAlive(channel);
-		if (!common::UDSProtocolCommonSteps::authorizeWithRetry(channel, canId, common::getPinArray(pin))) {
+		common::UDSProtocolCommonSteps::keepAlive(currentChannel());
+		if (!common::UDSProtocolCommonSteps::authorizeWithRetry(currentChannel(), canId, common::getPinArray(pin))) {
 			throw std::runtime_error("SBL security access failed");
 		}
 		common::VBFParser vbfParser;
@@ -732,17 +735,17 @@ void UDSRaw(common::CarPlatform carPlatform, uint8_t ecuId, j2534::J2534& j2534,
 			throw std::runtime_error("Failed to open SBL VBF: " + sblPath);
 		}
 		const common::VBF bootloader{ vbfParser.parse(sblVbf) };
-		if (!common::UDSProtocolCommonSteps::transferData(channel, canId, bootloader, [](size_t) {})) {
+		if (!common::UDSProtocolCommonSteps::transferData(currentChannel(), canId, bootloader, [](size_t) {})) {
 			throw std::runtime_error("SBL transfer failed");
 		}
-		if (!common::UDSProtocolCommonSteps::startRoutine(channel, canId, bootloader.header.call)) {
+		if (!common::UDSProtocolCommonSteps::startRoutine(currentChannel(), canId, bootloader.header.call)) {
 			throw std::runtime_error("SBL start failed");
 		}
 		warmupPostStartRawChannel(channelProvider, channels, ecuId, canId);
 	}
 
 	if (session != 0) {
-		if (!runUdsProbe(channel, canId, "Session", { 0x10, session }, { session }, 3000)) {
+		if (!runUdsProbe(currentChannel(), canId, "Session", { 0x10, session }, { session }, 3000)) {
 			throw std::runtime_error("Failed to enter requested diagnostic session");
 		}
 	}
