@@ -14,6 +14,7 @@ add_executable(VolvoToolsTests
     PinSearchTests.cpp
     SecurityKeyTests.cpp
     CliSupportTests.cpp
+    IsoTpReassembleTests.cpp
 )
 
 if (WIN32)

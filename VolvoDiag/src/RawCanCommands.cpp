@@ -1,6 +1,7 @@
 #include "RawCanCommands.hpp"
 
 #include "DiagContext.hpp"
+#include "IsoTpReassemble.hpp"
 #include "OutputFormat.hpp"
 
 #include <common/Util.hpp>
@@ -147,6 +148,10 @@ std::string formatCanFramePayload(const PASSTHRU_MSG& msg)
 struct ProbeMatch {
     PASSTHRU_MSG frame;
     std::vector<uint8_t> payload;
+    // Non-zero when the payload came from first-frame reassembly: the total length the
+    // FF declared. A shorter payload means the reassembly was truncated (timeout or
+    // sequence gap) and must not be presented as a complete response.
+    size_t reassembledLength{ 0 };
 };
 
 bool matchesProbeResponse(uint32_t responseId, uint32_t requestId, const RunOptions& options)
@@ -233,6 +238,9 @@ std::optional<ProbeMatch> readProbeResponseReassembled(const j2534::J2534Channel
             for (size_t i = 2; i < framePayload.size() && payload.size() < expectedLength; ++i) {
                 payload.push_back(framePayload[i]);
             }
+            // ISO-TP: the first CF carries (FF SN + 1), then the sequence rolls 0..15.
+            unsigned expectedSequence = ((static_cast<unsigned>(pci) & 0x0Fu) + 1u) & 0x0Fu;
+            bool sequenceGap = false;
 
             while (payload.size() < expectedLength && !stopRequested.load()) {
                 const auto now2 = std::chrono::steady_clock::now();
@@ -241,7 +249,9 @@ std::optional<ProbeMatch> readProbeResponseReassembled(const j2534::J2534Channel
                 }
                 const auto followUpMsgs = readCanBatch(channel, remainingMs(deadline, now2));
                 for (const auto& followMsg : followUpMsgs) {
-                    if (followMsg.DataSize < 4) {
+                    if (followMsg.DataSize < 5) {
+                        // 4-byte CAN id + at least one payload byte; anything shorter
+                        // cannot carry a consecutive-frame PCI.
                         continue;
                     }
                     const auto followResponseId = common::canIdFromFrame(followMsg);
@@ -251,17 +261,27 @@ std::optional<ProbeMatch> readProbeResponseReassembled(const j2534::J2534Channel
                     if (followResponseId != responseId) {
                         continue;
                     }
-                    for (size_t i = 4; i < followMsg.DataSize && payload.size() < expectedLength; ++i) {
-                        const auto byte = followMsg.Data[i];
-                        if ((byte & 0xF0) == 0x20) {
-                            continue;
-                        }
-                        payload.push_back(byte);
+                    // Only the byte right after the CAN id is a PCI candidate; the rest is
+                    // data copied verbatim. A sequence gap means frames were lost - report
+                    // and stop instead of gluing mismatched pieces together.
+                    const auto cfStatus = appendConsecutiveFrame(payload, expectedSequence,
+                        followMsg.Data + 4, followMsg.DataSize - 4, expectedLength);
+                    if (cfStatus == ConsecutiveFrameStatus::SequenceGap) {
+                        LOG(WARNING) << "probe reassembly sequence gap on response id=0x"
+                                     << std::hex << responseId << ": got SN "
+                                     << static_cast<unsigned>(followMsg.Data[4] & 0x0F)
+                                     << ", expected " << std::dec << expectedSequence;
+                        sequenceGap = true;
+                        break;
                     }
+                }
+                if (sequenceGap) {
+                    break;
                 }
             }
 
-            return ProbeMatch{msg, std::move(payload)};
+            ProbeMatch match{ msg, std::move(payload), expectedLength };
+            return match;
         }
     }
     return std::nullopt;
@@ -597,7 +617,13 @@ void runProbe(const std::vector<j2534::DeviceInfo>& devices, const RunOptions& o
             const auto payload = options.probeReassemble
                 ? formatBytes(response->payload)
                 : formatCanFramePayload(response->frame);
-            output.each([&](std::ostream& os) { writeProbeRow(os, requestId, responseIdText, "ok", payload); });
+            // A reassembled payload shorter than what the first frame declared was
+            // truncated (timeout or sequence gap) - never present it as a complete answer.
+            const bool incomplete = options.probeReassemble && response->reassembledLength != 0
+                && response->payload.size() < response->reassembledLength;
+            output.each([&](std::ostream& os) {
+                writeProbeRow(os, requestId, responseIdText, incomplete ? "incomplete" : "ok", payload);
+            });
         }
 
         if (options.probeGapMs > 0) {
