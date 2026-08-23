@@ -6,6 +6,7 @@
 #include <common/ConfigurationInfo.hpp>
 #include <common/J2534ChannelProvider.hpp>
 
+#include <atomic>
 #include <chrono>
 #include <condition_variable>
 #include <deque>
@@ -72,6 +73,10 @@ namespace logger {
 		std::condition_variable _cond;
 		std::condition_variable _callbackCond;
 		bool _stopped;
+	// Set by a worker thread that gave up (dead ECU channel or dead output callbacks);
+	// makes isStarted() false so the application notices instead of waiting forever.
+	std::atomic<bool> _internalError{false};
+	size_t _consecutiveCallbackFailures{0};
 
 		std::unique_ptr<LoggerImpl> _loggerImpl;
 

@@ -379,6 +379,16 @@ TEST(Cli, ProbeReassembleFlag)
     EXPECT_TRUE(o.probeReassemble);
 }
 
+TEST(Cli, ProbeRejectsEmptyAndOversizedData)
+{
+    RunOptions o;
+    // An empty payload is protocol-invalid (ISO-TP SF with length 0); it must fail at
+    // parse time instead of after the device has been opened.
+    EXPECT_FALSE(parse({"probe", "-f", "P3", "--bus", "CAN MS", "--data", ""}, o));
+    EXPECT_FALSE(parse({"probe", "-f", "P3", "--bus", "CAN MS",
+        "--data", "01 02 03 04 05 06 07 08"}, o));
+}
+
 TEST(Cli, ProbeUsesOutputForCsv)
 {
     RunOptions o;

@@ -232,6 +232,7 @@ namespace logger {
 		_parameters = parameters;
 		_loggingInterval = loggingInterval;
 		_stopped = false;
+		_internalError = false;
 
 		_callbackThread = std::thread([this]() { callbackFunction(); });
 		_loggingThread = std::thread([this]() { logFunction(); });
@@ -260,7 +261,7 @@ namespace logger {
 
 	bool Logger::isStarted() const {
 		std::unique_lock<std::mutex> lock{ _mutex };
-		return !_stopped;
+		return !_stopped && !_internalError;
 	}
 
 	void Logger::registerParameters(j2534::J2534Channel& channel) {
@@ -317,6 +318,10 @@ namespace logger {
 				do {
 					nextWakeup += loggingInterval;
 				} while (nextWakeup <= now);
+			}
+			if (errorCount >= maxErrorCount) {
+				LOG(ERROR) << "Logging stopped: " << maxErrorCount << " consecutive request failures";
+				_internalError = true;
 			}
 			LOG(INFO) << "Logger loop exit, errorCount=" << errorCount;
 		}
@@ -378,8 +383,14 @@ namespace logger {
 	}
 
 	void Logger::callbackFunction() {
+		// A throwing callback (e.g. the CSV writer losing its output stream) must neither
+		// escape this bare thread entry - that calls std::terminate - nor spin unnoticed:
+		// after kMaxConsecutiveCallbackFailures the thread stops and isStarted() flips so
+		// the application notices instead of logging into a dead sink.
+		constexpr size_t kMaxConsecutiveCallbackFailures = 10;
 		for (;;) {
 			LogRecord logRecord;
+			std::vector<LoggerCallback*> callbacks;
 			{
 				std::unique_lock<std::mutex> lock{ _callbackMutex };
 				_callbackCond.wait(
@@ -389,17 +400,37 @@ namespace logger {
 				}
 				logRecord = _loggedRecords.front();
 				_loggedRecords.pop_front();
+				callbacks = _callbacks;
 			}
 			std::vector<double> formattedValues(_parameters.parameters().size());
 			for (size_t i = 0; i < formattedValues.size() && i < logRecord.values.size(); ++i) {
 				formattedValues[i] =
 					_parameters.parameters()[i].formatValue(logRecord.values[i]);
 			}
-			{
-				std::unique_lock<std::mutex> lock{ _callbackMutex };
-				for (const auto callback : _callbacks) {
+			size_t failuresThisRecord = 0;
+			for (const auto callback : callbacks) {
+				try {
 					callback->onLogMessage(logRecord.timePoint, formattedValues);
 				}
+				catch (const std::exception& ex) {
+					LOG(ERROR) << "Log callback failed: " << ex.what();
+					++failuresThisRecord;
+				}
+				catch (...) {
+					LOG(ERROR) << "Log callback failed with unknown exception";
+					++failuresThisRecord;
+				}
+			}
+			if (failuresThisRecord == 0) {
+				_consecutiveCallbackFailures = 0;
+			}
+			else if (++_consecutiveCallbackFailures >= kMaxConsecutiveCallbackFailures) {
+				LOG(ERROR) << "Stopping logging: callbacks failed "
+					<< _consecutiveCallbackFailures << " records in a row";
+				_internalError = true;
+			}
+			if (_internalError) {
+				break;
 			}
 		}
 	}

@@ -1052,8 +1052,10 @@ bool parseOptions(int argc, const char* argv[], RunOptions& options)
                 throw std::runtime_error("--from must be less than or equal to --to");
             }
             options.requestData = common::parseHexBytes(probeCommand.get<std::string>("--data"));
-            if (options.requestData.size() > 7) {
-                throw std::runtime_error("--data must fit in one ISO-TP single frame payload (max 7 bytes)");
+            // Fail at parse time, not after the device is open: a zero-length ISO-TP
+            // single frame is protocol-invalid and the shared frame builder rejects it.
+            if (options.requestData.empty() || options.requestData.size() > 7) {
+                throw std::runtime_error("--data must contain 1-7 UDS bytes");
             }
             options.probeResponseOffset = probeCommand.get<unsigned>("--response-offset");
             ensureCanIdFits(options.probeResponseOffset, "--response-offset");
