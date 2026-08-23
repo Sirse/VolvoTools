@@ -978,7 +978,13 @@ namespace {
         else if(compressionType == "lzss") {
             return CompressionType::LZSS;
         }
-        return CompressionType::None;
+        else if(compressionType == "none") {
+            return CompressionType::None;
+        }
+        // A typo here used to degrade silently to None; the value is configuration, and
+        // unknown values must be named, not guessed.
+        throw std::runtime_error("Unknown CompressionType \"" + node[tag].as<std::string>()
+            + "\" in vehicle configuration (expected none/bosch/lzss)");
     }
 
     static EncryptionType getEcuEncryption(const YAML::Node& node)
@@ -987,14 +993,18 @@ namespace {
         if(!node[tag].IsDefined()) {
             return EncryptionType::None;
         }
-        const auto compressionType = toLower(node[tag].as<std::string>());
-        if(compressionType == "xor") {
+        const auto encryptionType = toLower(node[tag].as<std::string>());
+        if(encryptionType == "xor") {
             return EncryptionType::XOR;
         }
-        else if(compressionType == "aes") {
+        else if(encryptionType == "aes") {
             return EncryptionType::AES;
         }
-        return EncryptionType::None;
+        else if(encryptionType == "none") {
+            return EncryptionType::None;
+        }
+        throw std::runtime_error("Unknown EncryptionType \"" + node[tag].as<std::string>()
+            + "\" in vehicle configuration (expected none/xor/aes)");
     }
 
     static bool getFlag(const YAML::Node& node, const std::string& tag)

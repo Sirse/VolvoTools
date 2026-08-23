@@ -220,7 +220,9 @@ bool getRunOptions(int argc, const char* argv[], std::string& deviceName,
 
 	argparse::ArgumentParser wakeup_command("wakeup", "1.0", argparse::default_arguments::help);
     addDebugArgument(wakeup_command);
-	wakeup_command.add_description("Wake up CAN network");
+	wakeup_command.add_description(
+		"Send a functional ECUReset broadcast (11 11, then 11 81 on 0x7DF): this resets\n"
+		"every module that hears it - it does not wake anything up.");
 
 	argparse::ArgumentParser diag_command("diag", "1.0", argparse::default_arguments::help);
     addDebugArgument(diag_command);
