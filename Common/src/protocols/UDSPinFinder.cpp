@@ -330,6 +330,9 @@ namespace common {
 
     UDSPinFinder::~UDSPinFinder()
     {
+        // A scan that was never stopped must not keep this thread (and the bus) alive
+        // until the window is exhausted - request the stop before joining.
+        stop();
         if (_thread.joinable()) {
             _thread.join();
         }
@@ -337,6 +340,7 @@ namespace common {
 
     UDSPinFinder::State UDSPinFinder::getCurrentState() const
     {
+        std::unique_lock<std::mutex> lock{ _implMutex };
         if (_impl) {
             return _impl->getCurrentState();
         }
@@ -345,6 +349,7 @@ namespace common {
 
     std::optional<uint64_t> UDSPinFinder::getFoundPin() const
     {
+        std::unique_lock<std::mutex> lock{ _implMutex };
         if (_impl) {
             return _impl->getFoundPin();
         }
@@ -353,12 +358,22 @@ namespace common {
 
     bool UDSPinFinder::start()
     {
-        if (_impl) {
+        // CAS instead of an _impl check: the impl appears on the worker thread only after
+        // the slow channel open, so two early start() calls must not spawn two scans.
+        bool expected = false;
+        if (!_started.compare_exchange_strong(expected, true)) {
             return false;
         }
         _thread = std::thread([this] {
             auto channels{ _channelProvider.getAllChannels(_data->ecuId) };
-            _impl = std::make_unique<UDSPinFinderImpl>(channels, *_data);
+            auto impl{ std::make_unique<UDSPinFinderImpl>(channels, *_data) };
+            if (_stopRequested.load()) {
+                impl->stop();
+            }
+            {
+                std::unique_lock<std::mutex> lock{ _implMutex };
+                _impl = std::move(impl);
+            }
             FSM::Instance fsm{ *_impl };
 
             while(!_impl->isStopped()) {
@@ -370,6 +385,8 @@ namespace common {
 
     void UDSPinFinder::stop()
     {
+        _stopRequested.store(true);
+        std::unique_lock<std::mutex> lock{ _implMutex };
         if (_impl) {
             _impl->stop();
         }

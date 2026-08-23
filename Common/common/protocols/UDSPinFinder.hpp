@@ -3,6 +3,7 @@
 #include <common/J2534ChannelProvider.hpp>
 #include <common/protocols/PinSearch.hpp>
 
+#include <atomic>
 #include <functional>
 #include <mutex>
 #include <thread>
@@ -43,7 +44,12 @@ private:
     const J2534ChannelProvider _channelProvider;
     std::thread _thread;
     std::unique_ptr<struct FinderData> _data;
+    // The worker thread creates the impl after the (slow) channel open; these guard its
+    // publication and carry a stop request made before that, so it can never be lost.
+    mutable std::mutex _implMutex;
     std::unique_ptr<class UDSPinFinderImpl> _impl;
+    std::atomic<bool> _stopRequested{ false };
+    std::atomic<bool> _started{ false };
 };
 
 } // namespace common
