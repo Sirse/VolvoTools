@@ -6,7 +6,7 @@
 
 #pragma warning(push)
 #pragma warning(disable : 4996)
-#include "../fast-cpp-csv-parser/csv.h"
+#include "csv.h"
 #pragma warning(pop)
 
 #include <cctype>

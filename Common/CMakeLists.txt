@@ -5,11 +5,6 @@ find_package(Boost REQUIRED)
 find_package(yaml-cpp REQUIRED)
 find_package(Easyloggingpp REQUIRED)
 
-aux_source_directory(${CMAKE_CURRENT_SOURCE_DIR}/src SUB_SOURCES)
-aux_source_directory(${CMAKE_CURRENT_SOURCE_DIR}/src/protocols SUB_SOURCES)
-aux_source_directory(${CMAKE_CURRENT_SOURCE_DIR}/src/encryption SUB_SOURCES)
-aux_source_directory(${CMAKE_CURRENT_SOURCE_DIR}/src/compression SUB_SOURCES)
-
 # The vehicle configuration ships as common/data.yaml. CommonData.cpp used to be a hand-maintained
 # hex blob of the same file, which let the two drift apart (data.yaml itself is not part of any
 # CMake target). Regenerate CommonData.cpp from data.yaml as a build step: add_custom_command gives
@@ -27,26 +22,69 @@ add_custom_command(
     VERBATIM
 )
 
-set(SOURCE
-  ${SOURCE}
-  ${CMAKE_CURRENT_SOURCE_DIR}/src/CliSupport.cpp
-  ${COMMON_DATA_GENERATED}
-  ${SUB_SOURCES}
+# Explicit source lists: a glob hides new files until the next reconfigure and keeps
+# deleted ones in the build.
+set(COMMON_SOURCES
+    src/CliSupport.cpp
+    src/Gateway.cpp
+    src/J2534ChannelProvider.cpp
+    src/RuntimeDiagnostics.cpp
+    src/Util.cpp
+    src/VBFParser.cpp
+    src/protocols/UDSDid.cpp
+    src/protocols/UDSDtc.cpp
+    src/protocols/UDSError.cpp
+    src/protocols/UDSMessage.cpp
+    src/protocols/UDSPinFinder.cpp
+    src/protocols/UDSProtocolCommonSteps.cpp
+    src/protocols/UDSRequest.cpp
+    src/protocols/UDSStepType.cpp
+    src/protocols/UploadIntegrity.cpp
 )
-list(REMOVE_DUPLICATES SOURCE)
 
-FILE(GLOB_RECURSE HEADERS ${CMAKE_CURRENT_SOURCE_DIR}/common/*.h*)
-FILE(GLOB PRIVATE_HEADERS ${CMAKE_CURRENT_SOURCE_DIR}/src/*.h*)
+set(COMMON_HEADERS
+    common/BusConfiguration.hpp
+    common/CarPlatform.hpp
+    common/CliSupport.hpp
+    common/CommonData.hpp
+    common/CompressionType.hpp
+    common/ConfigurationInfo.hpp
+    common/ECUInfo.hpp
+    common/Gateway.hpp
+    common/GatewayEndpoint.hpp
+    common/J2534ChannelProvider.hpp
+    common/ProtocolType.hpp
+    common/RuntimeDiagnostics.hpp
+    common/Util.hpp
+    common/VBF.hpp
+    common/VBFChunk.hpp
+    common/VBFHeader.hpp
+    common/VBFParser.hpp
+    common/encryption/EncryptionType.hpp
+    common/protocols/PinSearch.hpp
+    common/protocols/UDSDid.hpp
+    common/protocols/UDSDtc.hpp
+    common/protocols/UDSError.hpp
+    common/protocols/UDSMessage.hpp
+    common/protocols/UDSPinFinder.hpp
+    common/protocols/UDSProtocolCommonSteps.hpp
+    common/protocols/UDSRequest.hpp
+    common/protocols/UDSService.hpp
+    common/protocols/UDSStepType.hpp
+    common/protocols/UploadIntegrity.hpp
+)
 
-add_library(${PROJECT_NAME} ${SOURCE} ${HEADERS} ${PRIVATE_HEADERS})
+source_group(TREE ${CMAKE_CURRENT_SOURCE_DIR} FILES ${COMMON_SOURCES} ${COMMON_HEADERS})
+
+add_library(${PROJECT_NAME} ${COMMON_SOURCES} ${COMMON_HEADERS} ${COMMON_DATA_GENERATED})
 
 if (WIN32)
-    target_compile_definitions(${PROJECT_NAME} PRIVATE   
-       # Prevents Windows.h from adding unnecessary includes    
-       WIN32_LEAN_AND_MEAN  
-       # Prevents Windows.h from defining min/max as macros 
-       NOMINMAX 
-    )   
+    target_compile_definitions(${PROJECT_NAME} PRIVATE
+       # Prevents Windows.h from adding unnecessary includes
+       WIN32_LEAN_AND_MEAN
+       # Prevents Windows.h from defining min/max as macros
+       NOMINMAX
+    )
 endif()
 
 target_include_directories(${PROJECT_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})

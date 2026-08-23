@@ -8,16 +8,38 @@ find_package(argparse REQUIRED)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-aux_source_directory(${CMAKE_CURRENT_SOURCE_DIR}/src SUB_SOURCES)
+# Explicit source lists: a glob hides new files until the next reconfigure and keeps
+# deleted ones in the build.
+set(CORE_SOURCES
+    src/CliParser.cpp
+    src/CommandRisk.cpp
+    src/DiagContext.cpp
+    src/ExitCodes.cpp
+    src/OutputFormat.cpp
+    src/RawCanCommands.cpp
+    src/ReconCapture.cpp
+    src/ScriptModel.cpp
+    src/SoftIsoTp.cpp
+    src/UdsCommands.cpp
+)
 
-# Split into a core library (all logic) and a thin executable (just main), so the
-# command/parsing logic can be linked into the test target too.
-set(CORE_SOURCES ${SUB_SOURCES})
-list(REMOVE_ITEM CORE_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/src/VolvoDiag.cpp)
+set(CORE_HEADERS
+    src/CliParser.hpp
+    src/CommandRisk.hpp
+    src/DiagContext.hpp
+    src/ExitCodes.hpp
+    src/IsoTpFrame.hpp
+    src/IsoTpReassemble.hpp
+    src/OutputFormat.hpp
+    src/RawCanCommands.hpp
+    src/ReconCapture.hpp
+    src/ScriptModel.hpp
+    src/SoftIsoTp.hpp
+    src/UdsCommands.hpp
+    src/VolvoDiagOptions.hpp
+)
 
-FILE(GLOB HEADERS ${CMAKE_CURRENT_SOURCE_DIR}/src/*.h*)
-
-add_library(VolvoDiagCore STATIC ${CORE_SOURCES} ${HEADERS})
+add_library(VolvoDiagCore STATIC ${CORE_SOURCES} ${CORE_HEADERS})
 target_include_directories(VolvoDiagCore PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
 target_link_libraries(VolvoDiagCore PUBLIC Common j2534 argparse::argparse easyloggingpp::easyloggingpp tomlplusplus::tomlplusplus)
 if (WIN32)
