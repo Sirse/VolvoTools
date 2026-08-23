@@ -110,20 +110,6 @@ namespace common {
     std::unique_ptr<j2534::J2534Channel> openRawCanChannel(j2534::J2534& j2534,
         const BusConfiguration& bus, std::optional<uint32_t> baudrateOverride = std::nullopt);
 
-    std::vector<uint8_t> readMessageCheckAndGet(
-        const j2534::J2534Channel& channel,
-        const std::vector<uint8_t> msgId,
-        const std::vector<uint8_t>& toCheck,
-        size_t retryCount = 10);
-
-    bool readMessageAndCheck(
-        const j2534::J2534Channel& channel,
-        const std::vector<uint8_t> msgId,
-        const std::vector<uint8_t>& toCheck,
-        size_t retryCount = 10);
-
-    CarPlatform getPlatfromFromVIN(const std::string& vin);
-
     CarPlatform parseCarPlatform(std::string input);
 
     ConfigurationInfo getConfigurationInfoByCarPlatform(CarPlatform carPlatform);
