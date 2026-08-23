@@ -129,8 +129,13 @@ std::unique_ptr<j2534::J2534Channel> J2534ChannelProvider::getChannelForEcu(uint
 {
     const auto ecuInfo{ getEcuInfoByEcuId(_carPlatform, ecuId) };
     auto channel = createChannelByBusConf(_j2534, std::get<0>(ecuInfo), std::get<1>(ecuInfo).canId, _baudrateOverride);
+    // Contract: either a working channel or an exception. Returning null here produced
+    // immediate dereferences in most callers and only the logger bothered to check.
+    if (!channel) {
+        throw std::runtime_error("Failed to open J2534 channel for ECU");
+    }
     LOG(INFO) << "J2534ChannelProvider getChannelForEcu ecu=0x" << std::hex << ecuId
-        << " protocol=" << (channel ? protocolName(channel->getProtocolId()) : "none")
+        << " protocol=" << protocolName(channel->getProtocolId())
         << " baudrate=" << std::get<0>(ecuInfo).baudrate
         << " canId=0x" << std::hex << std::get<1>(ecuInfo).canId;
     return channel;

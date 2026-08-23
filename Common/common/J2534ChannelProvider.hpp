@@ -33,6 +33,8 @@ public:
     // when non-empty. The flow-control filter is keyed to ecuId on each bus.
     std::vector<std::pair<BusConfiguration, std::unique_ptr<j2534::J2534Channel>>>
     getUdsChannelsByBus(uint32_t ecuId, const std::string& busNameFilter = "") const;
+    // Opens the channel of the bus that hosts this ECU. Throws std::runtime_error when
+    // the channel cannot be opened - the result is always a usable channel.
     std::unique_ptr<j2534::J2534Channel> getChannelForEcu(uint32_t ecuId) const;
 
 private:

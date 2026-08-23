@@ -706,10 +706,8 @@ void UDSRaw(common::CarPlatform carPlatform, uint8_t ecuId, j2534::J2534& j2534,
 
 	common::J2534ChannelProvider channelProvider{ j2534, carPlatform };
 	std::vector<std::unique_ptr<j2534::J2534Channel>> channels;
+	// getChannelForEcu throws on failure, so the channel here is always usable.
 	channels.emplace_back(channelProvider.getChannelForEcu(ecuId));
-	if (!channels.front()) {
-		throw std::runtime_error("Failed to open J2534 channel for ECU");
-	}
 	// Always fetched fresh from the vector: reopenRawUdsChannel may replace the channel
 	// object mid-session (post-start TX/RX failure), so a reference bound here once would
 	// dangle across the warmup path.

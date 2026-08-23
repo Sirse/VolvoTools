@@ -336,9 +336,6 @@ namespace logger {
 		try {
 			LOG(INFO) << "Logger opening ECU channel in logging thread, ecu=0x" << std::hex << _ecuId;
 			auto channel = _j2534ChannelProvider.getChannelForEcu(_ecuId);
-			if (!channel) {
-				throw std::runtime_error("Failed to open logger ECU channel");
-			}
 			LOG(INFO) << "Logger ECU channel opened";
 			registerParameters(*channel);
 			LOG(INFO) << "Logger loop enter";
