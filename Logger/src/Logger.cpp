@@ -176,77 +176,12 @@ namespace logger {
         std::vector<DidInfo> _didRequests;
 	};
 
-    class UDSSlowLoggerImpl : public LoggerImpl {
-    public:
-        UDSSlowLoggerImpl(uint32_t canId)
-            : LoggerImpl()
-            , _canId{ canId }
-        {
-        }
-
-    private:
-
-        virtual void
-        registerParameters(j2534::J2534Channel& channel,
-                           const LogParameters& parameters) override {
-
-            common::UDSRequest diagSessionRequest{_canId, { 0x10, 0x03 }};
-            if(diagSessionRequest.process(channel).empty()) {
-                return;
-            }
-        }
-
-        virtual std::vector<uint32_t>
-        requestMemory(j2534::J2534Channel& channel,
-                      const LogParameters& parameters) override {
-            std::vector<uint32_t> result(parameters.parameters().size());
-            constexpr uint8_t addrLength = 4;
-            constexpr uint8_t dataLength = 1;
-            constexpr uint8_t dataFormat = (dataLength << 4) + addrLength;
-            for (size_t i = 0; i < parameters.parameters().size(); ++i) {
-                const auto& param = parameters.parameters()[i];
-                std::vector<uint8_t> formattedParams{ 0x23, dataFormat };
-                const auto formattedAddr = common::toVector(param.addr());
-                const auto formattedSize = static_cast<uint8_t>(param.size());
-                formattedParams.insert(formattedParams.end(), formattedAddr.cbegin(), formattedAddr.cend());
-                formattedParams.push_back(formattedSize);
-                common::UDSRequest dataRequest(_canId, formattedParams);
-                try {
-                    const auto data = dataRequest.process(channel);
-                    if(data.empty()) {
-                        continue;
-                    }
-                    size_t paramOffset = 0;
-                    uint32_t value = 0;
-                    for(size_t j = 5; j < data.size(); ++j) {
-                        value += data[j] << (paramOffset * 8);
-                        ++paramOffset;
-                        if (paramOffset >= param.size()) {
-                            result[i] = value;
-                            break;
-                        }
-                    }
-                }
-                catch(const std::exception& ex) {
-                    LOG(ERROR) << ex.what();
-                }
-                catch(...) {
-                }
-            }
-            return result;
-        }
-
-        const uint32_t _canId;
-    };
 
     std::unique_ptr<LoggerImpl> createLoggerImpl(common::CarPlatform carPlatform, uint32_t cmId,
-                                                 const std::string& cmInfo, UdsLoggerOptions udsOptions)
+                                                 UdsLoggerOptions udsOptions)
 	{
-		using common::CarPlatform;
-        (void)cmInfo;
         const common::ECUInfo ecuInfo{ std::get<1>(common::getEcuInfoByEcuId(carPlatform, cmId)) };
-        // The fork is P3-only, served by the UDS logger. cmId selects which UDS DID base/ECU to
-        // read; the slow logger variant is kept for P3 targets too.
+        // The fork is P3-only, served by the UDS logger; cmId selects which ECU to read.
         return std::make_unique<UDSLoggerImpl>(ecuInfo.canId, udsOptions);
 	}
 
@@ -261,7 +196,7 @@ namespace logger {
 		, _udsOptions{ udsOptions }
 		, _loggingThread{}
 		, _stopped{ true }
-        , _loggerImpl(createLoggerImpl(_carPlatform, _ecuId, _cmInfo, _udsOptions)) {
+        , _loggerImpl(createLoggerImpl(_carPlatform, _ecuId, _udsOptions)) {
         LOG(DEBUG) << "Logger ctor done";
 	}
 
