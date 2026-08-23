@@ -30,6 +30,8 @@ jobs:
         run: |
           cd build
           cmake --build . --config Release --parallel 4 || exit 1
+      - name: Run unit tests
+        run: ctest --test-dir build --build-config Release --output-on-failure
       - name: Rename binaries with architecture, date, and commit hash
         shell: pwsh
         run: |
@@ -70,6 +72,8 @@ jobs:
         run: |
           cd build
           cmake --build . --config Release --parallel 4 || exit 1
+      - name: Run unit tests
+        run: ctest --test-dir build --build-config Release --output-on-failure
       - name: Rename binaries with architecture, date, and commit hash
         shell: pwsh
         run: |

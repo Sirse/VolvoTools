@@ -15,6 +15,9 @@ add_executable(VolvoToolsTests
     SecurityKeyTests.cpp
     CliSupportTests.cpp
     IsoTpReassembleTests.cpp
+    # The endian encoding vectors used to live in a separate optional target nobody ran;
+    # merged here so they execute with every normal test pass.
+    ${CMAKE_SOURCE_DIR}/Common/tests/EndianEncodingTests.cpp
 )
 
 if (WIN32)

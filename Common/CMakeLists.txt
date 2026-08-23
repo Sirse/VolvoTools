@@ -54,12 +54,3 @@ target_link_libraries(${PROJECT_NAME} yaml-cpp::yaml-cpp j2534 boost::boost inte
 if (WIN32)
     target_link_libraries(${PROJECT_NAME} advapi32)
 endif()
-
-option(VOLVOTOOLS_BUILD_ENDIAN_TESTS "Build endian encoding unit tests" OFF)
-if (VOLVOTOOLS_BUILD_ENDIAN_TESTS)
-    find_package(GTest REQUIRED)
-    add_executable(EndianEncodingTests tests/EndianEncodingTestMain.cpp tests/EndianEncodingTests.cpp)
-    target_link_libraries(EndianEncodingTests PRIVATE Common GTest::gtest)
-    include(GoogleTest)
-    gtest_discover_tests(EndianEncodingTests)
-endif()
