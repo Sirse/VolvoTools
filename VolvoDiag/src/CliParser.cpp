@@ -596,10 +596,12 @@ bool parseOptions(int argc, const char* argv[], RunOptions& options)
         .help("Hold frame interval");
     wakeCommand.add_argument("--hold-ms").scan<'u', size_t>().default_value(size_t{0})
         .help("Hold duration, 0 means until Ctrl-C");
-    wakeCommand.add_argument("--teardown").default_value(false).implicit_value(true).nargs(0)
-        .help("Send teardown frame after hold exits");
-    wakeCommand.add_argument("--teardown-data").default_value(std::string{"11 81"})
-        .help("UDS teardown payload to wrap as ISO-TP single frame");
+            wakeCommand.add_argument("--teardown").default_value(false).implicit_value(true).nargs(0)
+                .help("Send teardown frame after hold exits (requires --yes)");
+            wakeCommand.add_argument("--teardown-data").default_value(std::string{"11 81"})
+                .help("UDS teardown payload to wrap as ISO-TP single frame");
+            wakeCommand.add_argument("--yes").default_value(false).implicit_value(true).nargs(0)
+                .help("Confirm the teardown reset - its default 11 81 payload resets every ECU hearing the CAN id");
     wakeCommand.add_argument("--timeout-ms").scan<'u', size_t>().default_value(size_t{1000})
         .help("J2534 write timeout");
 
@@ -1090,6 +1092,12 @@ bool parseOptions(int argc, const char* argv[], RunOptions& options)
             options.intervalMs = wakeCommand.get<size_t>("--interval-ms");
             options.wakeHoldMs = wakeCommand.get<size_t>("--hold-ms");
             options.wakeTeardown = wakeCommand.get<bool>("--teardown");
+            // The teardown is a functional ECUReset in disguise: an address-targeted reset
+            // needs --yes, and so does resetting the whole bus through 0x7DF.
+            if (options.wakeTeardown && !wakeCommand.get<bool>("--yes")) {
+                throw std::runtime_error("--teardown sends a functional reset (default payload 11 81) "
+                    "that resets every ECU hearing the CAN id; pass --yes to confirm");
+            }
             options.timeoutMs = wakeCommand.get<size_t>("--timeout-ms");
             if (options.wakeBurstCount == 0) {
                 throw std::runtime_error("--count must be greater than zero");
