@@ -53,3 +53,8 @@ if (WIN32)
     target_compile_definitions(VolvoDiagCore PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
     target_compile_definitions(${PROJECT_NAME} PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
 endif()
+
+if (MSVC)
+    target_compile_options(VolvoDiagCore PRIVATE /W4)
+    target_compile_options(VolvoDiag PRIVATE /W4)
+endif()

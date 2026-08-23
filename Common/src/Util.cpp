@@ -78,6 +78,9 @@ namespace {
 
 } // namespace
 
+#pragma warning(push)
+#pragma warning(disable : 4996) // std::wstring_convert/codecvt_utf8 are deprecated in C++17;
+    // the standard has no replacement and Win32 conversion APIs are out of scope here.
     std::wstring toWstring(const std::string& str) {
         using convert_type = std::codecvt_utf8<wchar_t>;
         std::wstring_convert<convert_type, wchar_t> converter;
@@ -89,6 +92,7 @@ namespace {
         std::wstring_convert<convert_type, wchar_t> converter;
         return converter.to_bytes(str);
     }
+#pragma warning(pop)
 
     uint32_t encodeBigEndian(uint8_t byte1) { return byte1; }
     uint32_t encodeBigEndian(uint8_t byte1, uint8_t byte2) {
@@ -140,10 +144,10 @@ namespace {
     }
 
     std::vector<uint8_t> toVector(uint32_t value) {
-        const uint8_t byte1 = (value & 0xFF000000) >> 24;
-        const uint8_t byte2 = (value & 0xFF0000) >> 16;
-        const uint8_t byte3 = (value & 0xFF00) >> 8;
-        const uint8_t byte4 = (value & 0xFF);
+        const auto byte1 = static_cast<uint8_t>((value & 0xFF000000) >> 24);
+        const auto byte2 = static_cast<uint8_t>((value & 0xFF0000) >> 16);
+        const auto byte3 = static_cast<uint8_t>((value & 0xFF00) >> 8);
+        const auto byte4 = static_cast<uint8_t>(value & 0xFF);
         return { byte1, byte2, byte3, byte4 };
     }
 
@@ -489,31 +493,11 @@ namespace {
         if (data.size() > sizeof(result.Data)) {
             throw std::length_error("J2534 message payload exceeds PASSTHRU_MSG.Data capacity");
         }
-        result.DataSize = data.size();
+        result.DataSize = static_cast<unsigned long>(data.size());
         std::copy(data.begin(), data.end(), result.Data);
         return result;
     }
 
-    static std::vector<PASSTHRU_MSG>
-        makePassThruMsgs(unsigned long ProtocolID, unsigned long Flags,
-            const std::vector<std::vector<unsigned char>>& data) {
-        std::vector<PASSTHRU_MSG> result;
-        for (const auto msgData : data) {
-            PASSTHRU_MSG msg;
-            msg.ProtocolID = ProtocolID;
-            msg.RxStatus = 0;
-            msg.TxFlags = Flags;
-            msg.Timestamp = 0;
-            msg.ExtraDataIndex = 0;
-            if (msgData.size() > sizeof(msg.Data)) {
-                throw std::length_error("J2534 message payload exceeds PASSTHRU_MSG.Data capacity");
-            }
-            msg.DataSize = msgData.size();
-            std::copy(msgData.begin(), msgData.end(), msg.Data);
-            result.emplace_back(std::move(msg));
-        }
-        return result;
-    }
 
 
     // Fallback used when the bus configuration carries no explicit sample point.
@@ -1040,8 +1024,8 @@ namespace {
                 const auto& nodes = bus["Node"];
                 if (nodes.IsDefined()) {
                     if (nodes.IsSequence()) {
-                        for (const auto& node : bus["Node"]) {
-                            busConf.ecuInfo.emplace_back(processEcuNode(node));
+                        for (const auto& ecuNode : bus["Node"]) {
+                            busConf.ecuInfo.emplace_back(processEcuNode(ecuNode));
                         }
                     }
                     else {

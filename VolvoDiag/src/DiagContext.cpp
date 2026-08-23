@@ -189,7 +189,7 @@ void sendUdsNoWait(const j2534::J2534Channel& channel, uint32_t canId,
     }
     common::UDSMessage message{canId, requestData};
     unsigned long numMsgs = 0;
-    const auto writeStatus = channel.writeMsgs(message, numMsgs, timeoutMs);
+    const auto writeStatus = channel.writeMsgs(message, numMsgs, static_cast<unsigned long>(timeoutMs));
     if (writeStatus != STATUS_NOERROR || numMsgs < 1) {
         throw common::UDSRequestTxError(writeStatus, numMsgs,
             "Failed to send CAN message: " + common::j2534StatusToString(writeStatus));

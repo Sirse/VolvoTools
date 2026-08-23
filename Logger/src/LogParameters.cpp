@@ -4,8 +4,7 @@
 
 #include <easylogging++.h>
 
-#pragma warning(push)
-#pragma warning(disable : 4996)
+#pragma warning(push, 0)
 #include "csv.h"
 #pragma warning(pop)
 

@@ -115,7 +115,7 @@ std::vector<uint8_t> UDSRequest::process(const j2534::J2534Channel& channel, siz
     channel.clearRx();
     LOG(DEBUG) << "UDS TX can=0x" << std::hex << _canId
                << " data=" << toHexString(_data) << " timeout=" << std::dec << timeout;
-    const auto writeStatus = channel.writeMsgs(_message, numMsgs, timeout);
+    const auto writeStatus = channel.writeMsgs(_message, numMsgs, static_cast<unsigned long>(timeout));
     if(writeStatus != STATUS_NOERROR || numMsgs < 1) {
         LOG(ERROR) << "UDS TX failed can=0x" << std::hex << _canId
                    << " status=" << j2534StatusToString(writeStatus) << " written=" << std::dec << numMsgs;
@@ -149,7 +149,7 @@ std::vector<uint8_t> UDSRequest::process(const j2534::J2534Channel& channel, siz
             std::copy(data, data + dataSize, std::back_inserter(result));
             LOG(DEBUG) << "UDS RX accepted payload=" << toHexString(payloadFromFrame(data, dataSize));
             return false;
-        }, timeout);
+        }, static_cast<unsigned long>(timeout));
         }, pendingSeen, pendingTimeout);
     }
     catch (const UDSRequestRxTimeout&) {
@@ -182,7 +182,7 @@ std::vector<uint8_t> UDSRequest::process(const j2534::J2534Channel& channel,
     LOG(DEBUG) << "UDS TX can=0x" << std::hex << _canId
                << " data=" << toHexString(_data) << " expect=" << toHexString(checkData)
                << " timeout=" << std::dec << timeout;
-    const auto writeStatus = channel.writeMsgs(_message, numMsgs, timeout);
+    const auto writeStatus = channel.writeMsgs(_message, numMsgs, static_cast<unsigned long>(timeout));
     if(writeStatus != STATUS_NOERROR || numMsgs < 1) {
         LOG(ERROR) << "UDS TX failed can=0x" << std::hex << _canId
                    << " status=" << j2534StatusToString(writeStatus) << " written=" << std::dec << numMsgs;
@@ -238,7 +238,7 @@ std::vector<uint8_t> UDSRequest::process(const j2534::J2534Channel& channel,
                    << " payloadAfterStrip=" << toHexString(result)
                    << " rawPayload=" << toHexString(payloadFromFrame(data, dataSize));
         return false;
-    }, timeout);
+    }, static_cast<unsigned long>(timeout));
     }, pendingSeen, pendingTimeout);
     if (result.empty() && acceptedResponse) {
         LOG(DEBUG) << "UDS RX accepted response without payload can=0x" << std::hex << _canId

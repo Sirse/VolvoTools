@@ -20,7 +20,7 @@ PASSTHRU_MSG toPassThruMsg(uint32_t msgId, const uint8_t* Data, size_t DataSize,
     result.TxFlags = Flags;
     result.Timestamp = 0;
     result.ExtraDataIndex = 0;
-    result.DataSize = DataSize + sizeof(msgId);
+    result.DataSize = static_cast<unsigned long>(DataSize + sizeof(msgId));
     result.Data[0] = (msgId >> 24) & 0xFF;
     result.Data[1] = (msgId >> 16) & 0xFF;
     result.Data[2] = (msgId >> 8) & 0xFF;

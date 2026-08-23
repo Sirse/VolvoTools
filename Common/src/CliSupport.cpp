@@ -66,9 +66,9 @@ BOOL WINAPI HandlerRoutine(_In_ DWORD ctrlType)
 
 } // namespace
 
-StopDecision decideCtrlAction(bool alreadyRequested, bool uninterruptibleActive)
+StopDecision decideCtrlAction(bool alreadyRequested, bool regionActive)
 {
-    if (uninterruptibleActive) {
+    if (regionActive) {
         return StopDecision::Ignore;
     }
     return alreadyRequested ? StopDecision::ForceKill : StopDecision::GracefulStop;

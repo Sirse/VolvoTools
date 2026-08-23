@@ -92,3 +92,7 @@ target_link_libraries(${PROJECT_NAME} yaml-cpp::yaml-cpp j2534 boost::boost inte
 if (WIN32)
     target_link_libraries(${PROJECT_NAME} advapi32)
 endif()
+
+if (MSVC)
+    target_compile_options(Common PRIVATE /W4)
+endif()

@@ -493,7 +493,11 @@ void runScriptScenario(const std::vector<j2534::DeviceInfo>& devices, const RunO
                 {0x50, scenario.preludeSession});
         }
         if (!scenario.securityPinEnv.empty()) {
+
+#pragma warning(push)
+#pragma warning(disable : 4996) // getenv: the alternatives are not exception-safe here
             const auto* pin = std::getenv(scenario.securityPinEnv.c_str());
+#pragma warning(pop)
             if (!pin) throw std::runtime_error("Security PIN environment variable is not set: " + scenario.securityPinEnv);
             const auto bytes = common::parseHexBytes(pin);
             if (bytes.size() != 5) throw std::runtime_error("Security PIN must contain exactly 5 bytes");

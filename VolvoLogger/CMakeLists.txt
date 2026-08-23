@@ -24,3 +24,7 @@ if (WIN32)
     )
 endif()
 target_link_libraries(${PROJECT_NAME} Logger Common j2534 argparse::argparse easyloggingpp::easyloggingpp)
+
+if (MSVC)
+    target_compile_options(VolvoLogger PRIVATE /W4)
+endif()

@@ -376,7 +376,7 @@ namespace common {
             }
             LOG(INFO) << "transferChunk finish transfer, crc: {" << std::hex
                       << ((chunk.crc >> 8) & 0xFF) << ", " << (chunk.crc & 0xFF) <<"}";
-            if (!finishTransfer(channel, canId, chunk.crc)) {
+            if (!finishTransfer(channel, canId, static_cast<uint16_t>(chunk.crc & 0xFFFF))) {
                 return false;
             }
 		}

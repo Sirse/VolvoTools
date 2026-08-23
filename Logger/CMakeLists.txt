@@ -30,3 +30,7 @@ endif()
 target_include_directories(${PROJECT_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/fast-cpp-csv-parser)
 
 target_link_libraries(${PROJECT_NAME} Common j2534)
+
+if (MSVC)
+    target_compile_options(Logger PRIVATE /W4)
+endif()

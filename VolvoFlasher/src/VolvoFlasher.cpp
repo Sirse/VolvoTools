@@ -1300,8 +1300,8 @@ int main(int argc, const char* argv[]) {
 			else if (runMode == RunMode::Pin) {
 				if (!pinSpecified && pinWindowSet) {
 					// Expert explicit window without a start PIN: sweep it top-down.
-					const auto start = pinWindow.ceilPin ? *pinWindow.ceilPin : *pinWindow.floorPin;
-					findPin2(*j2534, carPlatform, ecuId, start, false, pinWindow);
+					const auto windowStart = pinWindow.ceilPin ? *pinWindow.ceilPin : *pinWindow.floorPin;
+					findPin2(*j2534, carPlatform, ecuId, windowStart, false, pinWindow);
 				}
 				else if (pinSpecified) {
 					findPin2(*j2534, carPlatform, ecuId, pin, scanPinsUpward, pinWindow);

@@ -20,3 +20,7 @@ if (WIN32)
     )
 endif()
 target_link_libraries(${PROJECT_NAME} Common j2534 Flasher argparse::argparse easyloggingpp::easyloggingpp)
+
+if (MSVC)
+    target_compile_options(VolvoFlasher PRIVATE /W4)
+endif()

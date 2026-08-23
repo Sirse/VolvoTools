@@ -269,7 +269,7 @@ namespace common {
     };
 
     struct Authorize : public BaseState {
-        void enter(PlanControl& control)
+        void enter(PlanControl&)
         {
         }
 
