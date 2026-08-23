@@ -218,13 +218,7 @@ int main(int argc, const char *argv[]) {
     }
     {
       try {
-        std::unique_ptr<j2534::J2534> j2534{
-            std::make_unique<j2534::J2534>(device.libraryName)};
-        std::string name =
-            device.deviceName.find("DiCE-") != std::string::npos
-                ? device.deviceName
-                : "";
-        j2534->PassThruOpen(name);
+        std::unique_ptr<j2534::J2534> j2534{common::openJ2534Device(device)};
         logger::LogParameters params{paramsFilePath};
         logger::FileLogWriter fileLogWriter(outputPath, params);
         ConsoleLogWriter consoleLogWriter{printCount};

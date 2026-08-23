@@ -6,7 +6,12 @@
 #include <chrono>
 #include <functional>
 #include <iosfwd>
+#include <memory>
 #include <vector>
+
+namespace j2534 {
+class J2534;
+}
 
 namespace common {
 
@@ -17,6 +22,11 @@ bool isDebugLoggingRequested(int argc, const char* argv[]);
 void requestStop();
 void resetStopRequested();
 bool waitForStopOrTimeout(std::chrono::milliseconds duration);
+
+// Loads the adapter's J2534 library and opens the device. The DiCE quirk lives here:
+// PassThruOpen needs the full device name for DiCE-* adapters and an empty name for
+// everything else. Throws std::runtime_error on failure.
+std::unique_ptr<j2534::J2534> openJ2534Device(const j2534::DeviceInfo& device);
 
 // How the console Ctrl-handler reacts to a stop event.
 enum class StopDecision {

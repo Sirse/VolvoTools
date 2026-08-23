@@ -2,6 +2,8 @@
 
 #include "common/RuntimeDiagnostics.hpp"
 
+#include <j2534/J2534.hpp>
+
 #include <algorithm>
 #include <iostream>
 #include <stdexcept>
@@ -140,6 +142,18 @@ void installConsoleCtrlHandler(const std::function<void()>& onStop)
     if (!SetConsoleCtrlHandler(HandlerRoutine, TRUE)) {
         throw std::runtime_error("Can't set console control handler");
     }
+}
+
+std::unique_ptr<j2534::J2534> openJ2534Device(const j2534::DeviceInfo& device)
+{
+    auto j2534 = std::make_unique<j2534::J2534>(device.libraryName);
+    // DiCE only opens when PassThruOpen receives its full device name; every other
+    // adapter wants an empty one. This quirk used to be copied per tool.
+    const std::string name = device.deviceName.find("DiCE-") != std::string::npos
+        ? device.deviceName
+        : "";
+    j2534->PassThruOpen(name);
+    return j2534;
 }
 
 void printAvailableDevices(std::ostream& output, const std::vector<j2534::DeviceInfo>& devices)

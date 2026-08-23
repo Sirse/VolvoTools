@@ -1242,13 +1242,7 @@ int main(int argc, const char* argv[]) {
 			return 1;
 		}
 		try {
-			std::string name =
-				device.deviceName.find("DiCE-") != std::string::npos
-				? device.deviceName
-				: "";
-			std::unique_ptr<j2534::J2534> j2534{
-				std::make_unique<j2534::J2534>(device.libraryName) };
-			j2534->PassThruOpen(name);
+			std::unique_ptr<j2534::J2534> j2534{ common::openJ2534Device(device) };
 			LOG(INFO) << "Selected device=" << device.deviceName
 				<< " library=" << device.libraryName
 				<< " mode=" << static_cast<int>(runMode)

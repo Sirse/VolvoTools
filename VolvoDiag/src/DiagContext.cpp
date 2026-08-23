@@ -3,6 +3,7 @@
 #include "ExitCodes.hpp"
 #include "OutputFormat.hpp"
 
+#include <common/CliSupport.hpp>
 #include <common/Util.hpp>
 #include <common/protocols/UDSError.hpp>
 #include <common/protocols/UDSMessage.hpp>
@@ -106,12 +107,8 @@ void ensureUdsPlatform(common::CarPlatform carPlatform)
 std::unique_ptr<j2534::J2534> openDevice(const j2534::DeviceInfo& device)
 {
     try {
-        auto j2534 = std::make_unique<j2534::J2534>(device.libraryName);
-        const std::string name = device.deviceName.find("DiCE-") != std::string::npos
-            ? device.deviceName
-            : "";
-        j2534->PassThruOpen(name);
-        return j2534;
+        // The DiCE naming quirk lives in the shared helper.
+        return common::openJ2534Device(device);
     }
     catch (const DiagError&) {
         throw;
