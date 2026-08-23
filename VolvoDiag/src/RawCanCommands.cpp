@@ -93,17 +93,20 @@ size_t readRawFrames(const j2534::J2534Channel& channel, DiagOutput& output,
                      size_t count, size_t timeoutMs, size_t durationMs)
 {
     const auto start = std::chrono::steady_clock::now();
-    const auto deadline = durationMs > 0
+    // Total wait budget: the response timeout counts from the transmit, not per read
+    // batch - otherwise a slow ECU answering fewer frames than --count loops forever.
+    const auto responseDeadline = start + std::chrono::milliseconds(timeoutMs);
+    const auto durationDeadline = durationMs > 0
         ? start + std::chrono::milliseconds(durationMs)
         : std::chrono::steady_clock::time_point::max();
+    const auto deadline = std::min(responseDeadline, durationDeadline);
     size_t matchedCount = 0;
     while (!stopRequested.load() && matchedCount < count) {
         const auto now = std::chrono::steady_clock::now();
         if (now >= deadline) {
             break;
         }
-        const auto readTimeout = durationMs > 0 ? remainingMs(deadline, now) : static_cast<unsigned long>(timeoutMs);
-        const auto msgs = readCanBatch(channel, readTimeout);
+        const auto msgs = readCanBatch(channel, remainingMs(deadline, now));
         for (const auto& msg : msgs) {
             if (!shouldPrintFrame(msg, filters, txEchoFilter)) {
                 continue;
