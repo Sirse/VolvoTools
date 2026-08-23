@@ -36,6 +36,57 @@ using Table = toml::table;
     throw std::runtime_error("Scenario " + path + ": " + message);
 }
 
+// Substitutes ${name} markers inside one string value and records any marker that no
+// variable defines.
+void substituteMarkersInString(std::string& text,
+    const std::vector<std::pair<std::string, std::string>>& variables,
+    std::vector<std::string>& unresolved, const std::string& path)
+{
+    for (const auto& [name, value] : variables) {
+        const std::string marker = "${" + name + "}";
+        size_t position = 0;
+        while ((position = text.find(marker, position)) != std::string::npos) {
+            text.replace(position, marker.size(), value);
+            position += value.size();
+        }
+    }
+    size_t position = text.find("${");
+    while (position != std::string::npos) {
+        const auto end = text.find('}', position);
+        if (end == std::string::npos) {
+            break;
+        }
+        unresolved.push_back(path + ": " + text.substr(position, end - position + 1));
+        position = text.find("${", end);
+    }
+}
+
+// Walks the parsed TOML tree and substitutes variables into string values only. Values
+// can therefore never inject structure: whatever they contain stays a string. A marker
+// that survives every substitution is reported instead of running with placeholder data.
+void substituteScriptVariables(toml::node& node,
+    const std::vector<std::pair<std::string, std::string>>& variables,
+    std::vector<std::string>& unresolved, const std::string& path)
+{
+    node.visit([&](auto&& n) {
+        using NodeType = std::decay_t<decltype(n)>;
+        if constexpr (std::is_same_v<NodeType, toml::table>) {
+            for (auto& [key, child] : n) {
+                substituteScriptVariables(child, variables, unresolved, path + "." + std::string(key));
+            }
+        }
+        else if constexpr (std::is_same_v<NodeType, toml::array>) {
+            for (size_t i = 0; i < n.size(); ++i) {
+                substituteScriptVariables(n[i], variables, unresolved,
+                    path + "[" + std::to_string(i) + "]");
+            }
+        }
+        else if constexpr (std::is_same_v<NodeType, toml::value<std::string>>) {
+            substituteMarkersInString(n.get(), variables, unresolved, path);
+        }
+    });
+}
+
 void rejectUnknown(const Table& table, const std::string& path,
                    std::initializer_list<std::string_view> allowed)
 {
@@ -330,18 +381,23 @@ ScriptScenario loadScriptScenario(const std::string& path, const RunOptions& opt
         std::ifstream input(path);
         if (!input) throw std::runtime_error("Failed to open scenario file");
         std::string source((std::istreambuf_iterator<char>(input)), std::istreambuf_iterator<char>());
-        for (const auto& [name, value] : options.scriptVariables) {
-            const std::string marker = "${" + name + "}";
-            size_t position = 0;
-            while ((position = source.find(marker, position)) != std::string::npos) {
-                source.replace(position, marker.size(), value);
-                position += value.size();
-            }
-        }
         root = toml::parse(source, path);
     }
     catch (const toml::parse_error& ex) {
         throw std::runtime_error("Failed to parse TOML scenario '" + path + "': " + std::string(ex.description()));
+    }
+    // Substitution happens on the parsed tree, not on the raw text: a variable value with
+    // quotes or newlines cannot inject TOML structure, and an unresolved ${marker} is an
+    // error instead of silently running the scenario with placeholder bytes.
+    std::vector<std::string> unresolved;
+    substituteScriptVariables(root, options.scriptVariables, unresolved, "root");
+    if (!unresolved.empty()) {
+        std::string joined;
+        for (const auto& item : unresolved) {
+            joined += "\n  - " + item;
+        }
+        throw std::runtime_error("Unresolved scenario variable marker(s):" + joined
+            + "\nDefine them with --var name=value or remove the markers");
     }
     rejectUnknown(root, "root", {"version", "name", "platform", "ecu", "timeout_ms", "steps", "prelude"});
     ScriptScenario scenario;

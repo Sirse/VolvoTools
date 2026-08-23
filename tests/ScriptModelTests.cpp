@@ -95,7 +95,7 @@ steps = [{ uds = "22 D1 00" }]
     EXPECT_EQ(scenario.ecuId, 0xB2);
 }
 
-TEST(ScriptModel, VariableSubstitutionIsAppliedBeforeTomlParsing)
+TEST(ScriptModel, VariableSubstitutionReachesStringValues)
 {
     RunOptions options;
     options.scriptVariables.emplace_back("ECU", "B2");
@@ -105,6 +105,39 @@ ecu = "${ECU}"
 steps = [{ uds = "22 D1 00" }]
 )", options);
     EXPECT_EQ(scenario.ecuId, 0xB2);
+}
+
+TEST(ScriptModel, VariableValueCannotInjectTomlStructure)
+{
+    // The value contains quotes and a TOML assignment. Substituted into the raw text
+    // this would create a real 'evil' field; substituted into the parsed string value it
+    // must stay opaque payload text.
+    RunOptions options;
+    options.scriptVariables.emplace_back("N", "x\" evil = true\nb = \"");
+    const auto scenario = load("injection", R"(
+version = 1
+steps = [{ name = "${N}", uds = "22 D1 00" }]
+)", options);
+    ASSERT_EQ(scenario.steps.size(), 1u);
+    EXPECT_EQ(scenario.steps[0].name, "x\" evil = true\nb = \"");
+}
+
+TEST(ScriptModel, UnresolvedVariableMarkerFailsTheLoad)
+{
+    RunOptions options;
+    const auto path = writeScenario("unresolved", R"(
+version = 1
+steps = [{ uds = "${TYP0}" }]
+)");
+    try {
+        volvodiag::loadScriptScenario(path.string(), options);
+        FAIL() << "expected an unresolved-marker error";
+    }
+    catch (const std::exception& ex) {
+        const auto message = std::string(ex.what());
+        EXPECT_NE(message.find("${TYP0}"), std::string::npos);
+        EXPECT_NE(message.find("--var"), std::string::npos);
+    }
 }
 
 TEST(ScriptModel, RejectsUnknownFieldsAndMultipleOperations)
