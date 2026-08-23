@@ -1,6 +1,7 @@
 #include "common/protocols/UDSRequest.hpp"
 
 #include "common/protocols/UDSError.hpp"
+#include <j2534/J2534Channel.hpp>
 #include "common/Util.hpp"
 
 #include <easylogging++.h>
@@ -36,8 +37,6 @@ UDSRequestRxTimeout::UDSRequestRxTimeout(const std::string& message)
 
 namespace {
 
-constexpr char kChannelReadTimeoutText[] = "Timed out waiting for data from CAN channel";
-
 // Runs the channel read and translates a channel-level timeout into a UDS one. When the ECU
 // answered 7F <sid> 78 during the attempt it asked for more time, so grant it another full read
 // window instead of failing, until the pending budget is spent. Nothing is retransmitted: the
@@ -53,10 +52,9 @@ void readMsgsWithPendingBudget(Reader&& reader, bool& pendingSeen, size_t pendin
             reader();
             return;
         }
-        catch (const std::runtime_error& ex) {
-            if (std::string(ex.what()) != kChannelReadTimeoutText) {
-                throw;
-            }
+        // Typed, not text-matched: the channel signals an idle window with its own
+        // exception class.
+        catch (const j2534::J2534ReadTimeout&) {
             if (!pendingSeen) {
                 throw UDSRequestRxTimeout("UDS RX timeout waiting for matching response");
             }
@@ -112,6 +110,9 @@ std::vector<uint8_t> UDSRequest::process(const j2534::J2534Channel& channel, siz
                                          size_t pendingTimeout)
 {
     unsigned long numMsgs = 0;
+    // Same hygiene as the checkData overload: stale frames from a previous exchange with
+    // the same SID must not be mistaken for this response.
+    channel.clearRx();
     LOG(DEBUG) << "UDS TX can=0x" << std::hex << _canId
                << " data=" << toHexString(_data) << " timeout=" << std::dec << timeout;
     const auto writeStatus = channel.writeMsgs(_message, numMsgs, timeout);

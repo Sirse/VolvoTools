@@ -365,6 +365,14 @@ namespace logger {
 
 	void Logger::pushRecord(Logger::LogRecord&& record) {
 		std::unique_lock<std::mutex> lock{ _callbackMutex };
+		// Bound the queue: a slow writer must not grow memory for the whole session.
+		constexpr size_t kMaxQueuedRecords = 10000;
+		if (_loggedRecords.size() >= kMaxQueuedRecords) {
+			_loggedRecords.pop_front();
+			if (++_droppedRecords == 1 || (_droppedRecords % 1000) == 0) {
+				LOG(WARNING) << "Logger dropped " << _droppedRecords << " records total (consumer too slow)";
+			}
+		}
 		_loggedRecords.emplace_back(std::move(record));
 		_callbackCond.notify_all();
 	}

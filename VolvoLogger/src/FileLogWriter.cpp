@@ -31,22 +31,29 @@ void FileLogWriter::open(const std::string &outputPath,
   }
 
   LOG(INFO) << "Logger CSV output: " << outputPath;
-  _outputStream << "Time (sec),";
+  // No trailing separator: the file must parse with exactly one column per parameter.
+  _outputStream << "Time (sec)";
   for (const auto &param : parameters.parameters()) {
-    _outputStream << param.description() << "(" << param.unit() << ") "
-                  << param.name() << ",";
+    _outputStream << "," << param.description() << "(" << param.unit() << ") "
+                  << param.name();
   }
-  _outputStream << std::endl;
+  _outputStream << "\n";
 }
 
 void FileLogWriter::onLogMessage(std::chrono::milliseconds timePoint,
                                  const std::vector<double> &values) {
-  _outputStream << (timePoint.count() / 1000.0) << ",";
+  _outputStream << (timePoint.count() / 1000.0);
 
   for (const auto value : values) {
-    _outputStream << value << ",";
+    _outputStream << "," << value;
   }
-  _outputStream << std::endl;
+  _outputStream << '\n';
+  // Flush every row: a crash must not take the tail of the session with it, and a dead
+  // output stream has to surface as a logger error instead of vanishing bytes.
+  _outputStream.flush();
+  if (!_outputStream) {
+    throw std::runtime_error("Log output stream failed");
+  }
 }
 
 } // namespace logger

@@ -76,6 +76,7 @@ namespace logger {
 		std::unique_ptr<LoggerImpl> _loggerImpl;
 
 		std::deque<LogRecord> _loggedRecords;
+		size_t _droppedRecords{0};
 		std::vector<LoggerCallback*> _callbacks;
 	};
 

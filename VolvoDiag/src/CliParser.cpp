@@ -762,11 +762,11 @@ bool parseOptions(int argc, const char* argv[], RunOptions& options)
     monitorCommand.add_argument("--bus").help("Bus name override, e.g. \"CAN HS\" or \"CAN MS\"");
     addRawFilterArguments(monitorCommand);
     addTxEchoFilterArguments(monitorCommand, true);
-    monitorCommand.add_argument("--count").scan<'u', size_t>().default_value(size_t{0}).help("Stop after N matching frames, 0 means unlimited");
+    monitorCommand.add_argument("--count").scan<'u', size_t>().default_value(size_t{0}).help("Stop after N matching frames, 0 means unlimited (a count-only run waits at most 1000 ms per silence)");
     monitorCommand.add_argument("--duration-ms").scan<'u', size_t>().default_value(size_t{0})
         .help("Stop after N milliseconds, 0 means unlimited");
     monitorCommand.add_argument("--timeout-ms").scan<'u', size_t>().default_value(size_t{0})
-        .help("Alias for --duration-ms");
+        .help("Alias for --duration-ms; passing both is an error");
     monitorCommand.add_argument("-o", "--output").default_value(std::string{}).help("Optional CSV output path");
     monitorCommand.add_argument("--baseline-record").default_value(std::string{}).help("Record seen frame keys to this file (snapshot)");
     monitorCommand.add_argument("--baseline-compare").default_value(std::string{}).help("Print only frames whose key is absent from this baseline file");
@@ -1259,10 +1259,17 @@ bool parseOptions(int argc, const char* argv[], RunOptions& options)
                 throw std::runtime_error("monitor --drop-tx-echo requires at least one --tx-id");
             }
             options.monitorCount = monitorCommand.get<size_t>("--count");
+            if (monitorCommand.is_used("--duration-ms") && monitorCommand.is_used("--timeout-ms")) {
+                throw std::runtime_error("monitor: --duration-ms and --timeout-ms are the same option; pass only one");
+            }
             options.monitorDurationMs = monitorCommand.is_used("--duration-ms")
                 ? monitorCommand.get<size_t>("--duration-ms")
                 : monitorCommand.get<size_t>("--timeout-ms");
             if (options.monitorDurationMs == 0 && options.monitorCount > 0) {
+                // A count-only run still needs *some* deadline, otherwise frames that
+                // never arrive would hang the command forever.
+                std::cerr << "monitor: no --duration-ms given with --count; capping the wait at 1000 ms"
+                          << std::endl;
                 options.monitorDurationMs = 1000;
             }
             options.monitorOutputPath = monitorCommand.get<std::string>("-o");
