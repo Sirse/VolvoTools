@@ -177,8 +177,8 @@ void SoftIsoTp::sendRequest(const std::vector<uint8_t>& payload, size_t timeoutM
     if ((flow[0] >> 4) != 3 || (flow[0] & 0x0F) == 2)
         throw std::runtime_error("ISO-TP Flow Control overflow or invalid frame");
     if (flow[0] & 0x0F) throw std::runtime_error("ISO-TP Flow Control status not CTS");
-    const auto blockSize = flow[1];
-    const auto delay = stminMs(flow[2]);
+    unsigned blockSize = flow[1];
+    unsigned delay = stminMs(flow[2]);
     size_t offset = 6;
     uint8_t sequence = 1;
     size_t inBlock = 0;
@@ -194,6 +194,9 @@ void SoftIsoTp::sendRequest(const std::vector<uint8_t>& payload, size_t timeoutM
             }
             if ((nextFlow[0] >> 4) != 3 || (nextFlow[0] & 0x0F) != 0)
                 throw std::runtime_error("ISO-TP Flow Control overflowed or invalid");
+            // Every CTS reprograms BS/STmin for the blocks that follow it.
+            blockSize = nextFlow[1];
+            delay = stminMs(nextFlow[2]);
             inBlock = 0;
         }
         if (delay != 0) std::this_thread::sleep_for(std::chrono::milliseconds(delay));
@@ -217,6 +220,7 @@ std::vector<uint8_t> SoftIsoTp::receiveResponse(size_t timeoutMs)
         const auto type = first[0] >> 4;
         if (type == 0) {
             const auto length = first[0] & 0x0F;
+            if (length == 0) throw std::runtime_error("ISO-TP Single Frame declares zero length");
             if (length > first.size() - 1) throw std::runtime_error("Truncated ISO-TP Single Frame");
             std::vector<uint8_t> result(first.begin() + 1, first.begin() + 1 + length);
             if (result.size() >= 3 && result[0] == 0x7F && result[2] == 0x78) {
@@ -227,6 +231,10 @@ std::vector<uint8_t> SoftIsoTp::receiveResponse(size_t timeoutMs)
             return result;
         }
         if (type != 1 || first.size() < 2) throw std::runtime_error("Invalid ISO-TP First Frame");
+        // A low nibble of 0 marks the ISO-TP escape form with a 32-bit length in bytes
+        // 2..5; parsing it as a 12-bit length would silently misread the frame.
+        if ((first[0] & 0x0F) == 0)
+            throw std::runtime_error("ISO-TP First Frame with escaped 32-bit length is not supported");
         const size_t length = ((first[0] & 0x0F) << 8) | first[1];
         std::vector<uint8_t> result(first.begin() + 2, first.end());
         sendFrame(_raw, _txId, {0x30, _options.flowControlBlockSize, _options.flowControlStmin},
