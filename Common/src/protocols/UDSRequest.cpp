@@ -1,7 +1,6 @@
 #include "common/protocols/UDSRequest.hpp"
 
 #include "common/protocols/UDSError.hpp"
-#include <j2534/J2534Channel.hpp>
 #include "common/Util.hpp"
 
 #include <easylogging++.h>
