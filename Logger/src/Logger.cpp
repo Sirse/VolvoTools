@@ -84,8 +84,11 @@ namespace logger {
 				const LogParameters& parameters) override {
 
             common::UDSRequest diagSessionRequest{_canId, { 0x10, 0x03 }};
+            // Registration failures must be loud: a silent return left the DDDIDs
+            // unregistered, the loop read nothing but unregistered DID ids, and the real
+            // problem surfaced later as ten anonymous "request failed" errors.
             if(diagSessionRequest.process(channel).empty()) {
-                return;
+                throw std::runtime_error("Logger registration: extended session (10 03) got no response");
             }
             _didRequests.clear();
             for (size_t i = 0; i < parameters.parameters().size(); ++i) {
@@ -96,10 +99,13 @@ namespace logger {
             }
             for (const auto& didRequest: _didRequests) {
                 const auto did = didRequest.didId;
+                const auto didText = common::toHexString({ static_cast<uint8_t>(did >> 8),
+                    static_cast<uint8_t>(did & 0xFF) });
                 common::UDSRequest clearDDDIRequest{_canId, { 0x2C, 0x03, static_cast<uint8_t>(did >> 8), static_cast<uint8_t>(did) }};
                 const auto clearResponse{clearDDDIRequest.process(channel)};
                 if(clearResponse.empty()) {
-                    return;
+                    throw std::runtime_error("Logger registration: dynamic DID clear (2C 03) for DID "
+                        + didText + " got no response");
                 }
                 constexpr uint8_t addrLength = 4;
                 constexpr uint8_t dataLength = 2;
@@ -114,7 +120,8 @@ namespace logger {
                 }
                 common::UDSRequest registerRequest(_canId, formattedParams);
                 if(registerRequest.process(channel).empty()) {
-                    return;
+                    throw std::runtime_error("Logger registration: dynamic DID define (2C 02) for DID "
+                        + didText + " got no response");
                 }
             }
 		}
@@ -300,6 +307,9 @@ namespace logger {
 			std::unique_lock<std::mutex> lock{ _mutex };
 			_stopped = true;
 		}
+		// Wake the logging thread out of wait_until: without this, stop() blocked until
+		// the end of the current interval (a minute at --interval-ms 60000).
+		_cond.notify_all();
 		if (_loggingThread.joinable())
 			_loggingThread.join();
 
