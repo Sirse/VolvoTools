@@ -2,6 +2,7 @@
 
 #include "DiagContext.hpp"
 #include "ExitCodes.hpp"
+#include "IsoTpFrame.hpp"
 #include "OutputFormat.hpp"
 
 #include <common/J2534ChannelProvider.hpp>
@@ -141,27 +142,12 @@ std::vector<uint8_t> readDidRequest(uint16_t did)
             static_cast<uint8_t>(did)};
 }
 
-std::vector<uint8_t> isoTpSingleFramePayload(const std::vector<uint8_t>& udsPayload)
-{
-    if (udsPayload.empty() || udsPayload.size() > 7) {
-        throw std::runtime_error("UDS single-frame payload must contain 1-7 bytes");
-    }
-    std::vector<uint8_t> data;
-    data.reserve(8);
-    data.push_back(static_cast<uint8_t>(udsPayload.size()));
-    data.insert(data.end(), udsPayload.cbegin(), udsPayload.cend());
-    while (data.size() < 8) {
-        data.push_back(0x00);
-    }
-    return data;
-}
-
 void sendWakeBurst(j2534::J2534& j2534, const RunOptions& options)
 {
     const auto busInfo = selectedRawCanBus(options);
     ensureCanIdFits(options.wakeCanId, "--wake can-id");
     auto rawChannel = common::openRawCanChannel(j2534, busInfo, options.baudrateOverride);
-    const auto wakeData = isoTpSingleFramePayload(options.wakePayload);
+    const auto wakeData = makeIsoTpSingleFrame(options.wakePayload, /*padToEight=*/true);
     const auto wakeFrame = common::makeCanFrame(options.wakeCanId, wakeData);
     for (size_t i = 0; i < options.wakeBurstCount && !stopRequested.load(); ++i) {
         const auto status = rawChannel->writeMsg(wakeFrame, static_cast<unsigned long>(options.timeoutMs));
