@@ -497,7 +497,7 @@ void runWake(const std::vector<j2534::DeviceInfo>& devices, const RunOptions& op
     auto j2534 = openDevice(device);
     auto channel = common::openRawCanChannel(*j2534, busInfo, options.baudrateOverride);
 
-    const auto wakeData = makeIsoTpSingleFrame(options.wakePayload);
+    const auto wakeData = makeIsoTpSingleFrame(options.wakePayload, /*padToEight=*/false);
     const auto wakeFrame = common::makeCanFrame(options.wakeCanId, wakeData);
     for (size_t i = 0; i < options.wakeBurstCount && !stopRequested.load(); ++i) {
         const auto status = channel->writeMsg(wakeFrame, static_cast<unsigned long>(options.timeoutMs));
@@ -516,7 +516,7 @@ void runWake(const std::vector<j2534::DeviceInfo>& devices, const RunOptions& op
     unsigned long holdMsgId = 0;
     bool holdStarted = false;
     if (options.wakeHold && !stopRequested.load()) {
-        const auto holdData = makeIsoTpSingleFrame(options.wakeHoldPayload);
+        const auto holdData = makeIsoTpSingleFrame(options.wakeHoldPayload, /*padToEight=*/false);
         const auto holdFrame = common::makeCanFrame(options.wakeCanId, holdData);
         auto periodicMsg = common::makePassThruMsg(channel->getProtocolId(), channel->getTxFlags(), holdFrame);
         const auto status = channel->startPeriodicMsg(periodicMsg, holdMsgId,
@@ -557,7 +557,7 @@ void runWake(const std::vector<j2534::DeviceInfo>& devices, const RunOptions& op
     }
 
     if (options.wakeTeardown && !stopRequested.load()) {
-        const auto teardownData = makeIsoTpSingleFrame(options.wakeTeardownPayload);
+        const auto teardownData = makeIsoTpSingleFrame(options.wakeTeardownPayload, /*padToEight=*/false);
         const auto teardownFrame = common::makeCanFrame(options.wakeCanId, teardownData);
         const auto status = channel->writeMsg(teardownFrame, static_cast<unsigned long>(options.timeoutMs));
         if (status != STATUS_NOERROR) {
@@ -585,7 +585,7 @@ void runProbe(const std::vector<j2534::DeviceInfo>& devices, const RunOptions& o
 
     auto j2534 = openDevice(device);
     auto channel = common::openRawCanChannel(*j2534, busInfo, options.baudrateOverride);
-    const auto probeData = makeIsoTpSingleFrame(options.requestData);
+    const auto probeData = makeIsoTpSingleFrame(options.requestData, /*padToEight=*/false);
 
     output.line("request_can_id,response_can_id,status,response");
 
