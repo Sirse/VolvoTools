@@ -202,10 +202,6 @@ namespace flasher {
             common::UDSProtocolCommonSteps::broadcastEcuReset(_channels);
         }
 
-        void closeChannels()
-        {
-            _stateUpdater(FlasherState::CloseChannels);
-        }
 
         void done()
         {
@@ -239,7 +235,6 @@ namespace flasher {
         void setFailed(const std::string& message)
         {
             _isFailed = true;
-            _errorMessage = message;
             LOG(ERROR) << message;
             _errorUpdater(message);
         }
@@ -250,7 +245,6 @@ namespace flasher {
         const UDSFlasherParameters& _udsFlasherParameters;
         const uint32_t _canId;
         bool _isFailed;
-        std::string _errorMessage;
         // Active from the first erase call until the whole flash run (including application
         // validation and FSM teardown) has finished; see writeFlash().
         std::optional<common::UninterruptibleRegion> _destructiveRegion;

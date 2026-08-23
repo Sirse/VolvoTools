@@ -30,7 +30,6 @@ FlasherBase::FlasherBase(j2534::J2534 &j2534, FlasherParameters&& flasherParamet
     , _maximumProgress{ 0 }
     , _currentState{ FlasherState::Initial }
     , _flasherThread{}
-    , _stopRequested{ false }
 {
     LOG(DEBUG) << "FlasherBase ctor done";
 }
@@ -83,24 +82,7 @@ void FlasherBase::unregisterCallback(FlasherCallback &callback)
                      _callbacks.end());
 }
 
-void FlasherBase::start()
-{
-    std::unique_lock<std::mutex> lock(_mutex);
-    // Assigning a std::thread over a joinable one calls std::terminate. Guard against a second
-    // start() while a run is in flight (or finished but not yet joined). The check and the
-    // assignment happen under the same lock so two concurrent start() calls cannot race.
-    if (_flasherThread.joinable()) {
-        throw std::runtime_error("Flasher already started; wait for completion before starting again");
-    }
-    _flasherThread = std::thread([this]() {
-        run();
-    });
-}
 
-void FlasherBase::startSync()
-{
-    run();
-}
 
 void FlasherBase::run()
 {
@@ -207,32 +189,6 @@ void FlasherBase::setLastError(const std::string& error)
     _lastError = error;
 }
 
-void FlasherBase::runOnThread(std::function<void()> callable)
-{
-    std::unique_lock<std::mutex> lock(_mutex);
-    // Same hazard as start(): assigning a std::thread over a joinable one is std::terminate. The
-    // state check alone is not enough - the thread may not have moved the state off Initial yet,
-    // so a second call could slip through and clobber a live thread. Guard on joinable() instead,
-    // under the same lock as the assignment.
-    if (_flasherThread.joinable()) {
-        throw std::runtime_error("Flasher already started; wait for completion before starting again");
-    }
-    _flasherThread = std::thread([this, callable]() {
-        try {
-            callable();
-        }
-        catch(const std::exception& ex) {
-            LOG(ERROR) << "Exception during flashing: " << ex.what();
-            setLastError(ex.what());
-            setCurrentState(FlasherState::Error);
-        }
-        catch(...) {
-            LOG(ERROR) << "Exception during flashing";
-            setLastError("Unknown exception during flashing");
-            setCurrentState(FlasherState::Error);
-        }
-    });
-}
 
 std::vector<FlasherCallback *> FlasherBase::getCallbacks() const
 {

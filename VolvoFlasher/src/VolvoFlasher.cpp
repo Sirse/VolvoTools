@@ -8,7 +8,6 @@
 #include <common/J2534ChannelProvider.hpp>
 #include <common/RuntimeDiagnostics.hpp>
 #include <common/VBFParser.hpp>
-#include <common/SBL.hpp>
 #include <common/Util.hpp>
 
 #include <j2534/J2534.hpp>
@@ -379,27 +378,18 @@ public:
         case FlasherState::Initial:
             std::cout << "Starting";
             break;
-        case FlasherState::OpenChannels:
-            std::cout << "Open channels";
-            break;
         case FlasherState::FallAsleep:
             std::cout << "Go to sleep";
             break;
         case FlasherState::Authorize:
             std::cout << "Authorizing";
             break;
-		case FlasherState::ProgrammingSession:
-			std::cout << "Enter programming session";
-			break;
 		case FlasherState::LoadBootloader:
             std::cout << "Bootloader loading";
             break;
         case FlasherState::StartBootloader:
             std::cout << "Bootloader starting";
             break;
-		case FlasherState::RequestDownload:
-			std::cout << "Request download";
-			break;
 		case FlasherState::EraseFlash:
             std::cout << "Flash erasing";
             break;
@@ -411,9 +401,6 @@ public:
             break;
         case FlasherState::WakeUp:
             std::cout << "Waking up";
-            break;
-        case FlasherState::CloseChannels:
-            std::cout << "Close channels";
             break;
         case FlasherState::Done:
             std::cout << "Done";
@@ -535,7 +522,6 @@ void UDSFlash(common::CarPlatform carPlatform, uint8_t ecuId,
 		additionalData,
 		std::move(sblProvider),
 		flash,
-		{},  // encryptor is unused
 		baudrateOverride
 	};
 	flasher::UDSFlasherParameters udsFlasherParameters{
@@ -1134,7 +1120,6 @@ void readFlash(std::unique_ptr<j2534::J2534> j2534, common::CarPlatform carPlatf
 			"",
 			attachRunningSbl ? nullptr : std::make_unique<flasher::SBLProviderVBF>(*bootloader),
 			{{}, {}},
-			{},
 			baudrateOverride
 		};
 		flasher::UDSReaderParameters udsReaderParameters{

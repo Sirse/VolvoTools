@@ -3,7 +3,6 @@
 #include "FlasherState.hpp"
 #include "SBLProviderBase.hpp"
 
-#include <common/encryption/EncryptorBase.hpp>
 #include <common/J2534ChannelProvider.hpp>
 
 #include <functional>
@@ -24,7 +23,6 @@ struct FlasherParameters {
     std::string additionalData;
     std::shared_ptr<SBLProviderBase> sblProvider;
     const common::VBF flash;
-    std::unique_ptr<common::EncryptorBase> encryptor;
     // Applied only when explicitly set (an explicit -b on the command line); otherwise
     // every bus opens at its configured baudrate.
     std::optional<uint32_t> baudrateOverride;
@@ -45,8 +43,7 @@ public:
     void registerCallback(FlasherCallback &callback);
     void unregisterCallback(FlasherCallback &callback);
 
-    void start();
-    void startSync();
+    // Runs the flasher synchronously on the calling thread.
     void run();
 
 protected:
@@ -61,8 +58,6 @@ protected:
     void incCurrentProgress(size_t delta);
     void setMaximumProgress(size_t maximumProgress);
     void setLastError(const std::string& error);
-
-    void runOnThread(std::function<void()> callable);
 
 private:
     std::vector<FlasherCallback *> getCallbacks() const;
@@ -79,8 +74,6 @@ private:
     std::thread _flasherThread;
 
     std::vector<FlasherCallback *> _callbacks;
-
-    bool _stopRequested;
 };
 
 } // namespace flasher
