@@ -13,6 +13,8 @@
 #include <vector>
 #include <unordered_set>
 #include <iostream>
+#include <iomanip>
+#include <sstream>
 #include <utility>
 
 BOOST_FUSION_ADAPT_STRUCT(common::EraseBlock,
@@ -346,6 +348,17 @@ namespace common {
 		{
 			VBFHeader vbfHeader;
 			begin = parseVBFHeader(begin, end, vbfHeader);
+			if (vbfHeader.vbfVersion < 2) {
+				// Refuse up front instead of failing mid-flash: a v1 block carries a 1-byte
+				// checksum that cannot verify the written image, so the run would erase,
+				// write one chunk and then die on the TransferExit CRC comparison with a
+				// misleading "CRC mismatch" - with the ECU already half-flashed.
+				std::ostringstream message;
+				message << std::fixed << std::setprecision(1)
+					<< "Unsupported VBF version " << vbfHeader.vbfVersion
+					<< ": only VBF 2.x files carry verifiable 16-bit block CRCs";
+				throw std::runtime_error(message.str());
+			}
 			auto vbfChunks = parseVBFBody(vbfHeader, begin, end);
 			return { vbfHeader, vbfChunks };
 		}
