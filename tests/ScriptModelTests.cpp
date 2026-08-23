@@ -287,3 +287,61 @@ TEST(ReconCapture, ReconstructsOutOfOrderA4FramesAndRejectsGaps)
     EXPECT_THROW(volvodiag::reconstructReconImage(
         {frames[0], frames[1], frames[2]}, 0x73E, signature, 4), std::runtime_error);
 }
+
+// ---- destructive-step confirmation gate (--yes) ----------------------------
+
+TEST(ScriptModel, DestructiveServiceClassification)
+{
+    using volvodiag::isDestructiveUdsService;
+    // Persistent-change services: reset, DTC clear, write, routine, download/transfer.
+    EXPECT_TRUE(isDestructiveUdsService({0x11, 0x01}));
+    EXPECT_TRUE(isDestructiveUdsService({0x14, 0xFF, 0xFF, 0xFF}));
+    EXPECT_TRUE(isDestructiveUdsService({0x2E, 0xD1, 0x00, 0x01}));
+    EXPECT_TRUE(isDestructiveUdsService({0x31, 0x01, 0x03, 0x01}));
+    EXPECT_TRUE(isDestructiveUdsService({0x34, 0x00, 0x44}));
+    EXPECT_TRUE(isDestructiveUdsService({0x36, 0x01, 0xAA}));
+    // Read/state-changing-but-not-persistent services stay ungated.
+    EXPECT_FALSE(isDestructiveUdsService({}));
+    EXPECT_FALSE(isDestructiveUdsService({0x22, 0xF1, 0x90}));
+    EXPECT_FALSE(isDestructiveUdsService({0x10, 0x03}));
+    EXPECT_FALSE(isDestructiveUdsService({0x3E, 0x00}));
+    EXPECT_FALSE(isDestructiveUdsService({0x27, 0x01}));
+}
+
+TEST(ScriptModel, DestructiveStepsRequireConfirmation)
+{
+    const auto scenario = load("destructive", R"(
+version = 1
+steps = [
+    { name = "read", uds = "22 D1 00" },
+    { name = "write", uds = "2E D1 00 01 02" },
+]
+)");
+    EXPECT_NO_THROW(volvodiag::ensureDestructiveStepsConfirmed(scenario, true));
+    try {
+        volvodiag::ensureDestructiveStepsConfirmed(scenario, false);
+        FAIL() << "expected DiagError for an unconfirmed destructive step";
+    }
+    catch (const volvodiag::DiagError& ex) {
+        EXPECT_EQ(ex.code(), volvodiag::ExitCode::UsageError);
+        const auto message = std::string(ex.what());
+        EXPECT_NE(message.find("'write'"), std::string::npos);
+        EXPECT_NE(message.find("0x2e"), std::string::npos);
+        EXPECT_NE(message.find("--yes"), std::string::npos);
+    }
+}
+
+TEST(ScriptModel, ReadOnlyScenarioNeedsNoConfirmation)
+{
+    const auto scenario = load("gate_readonly", R"(
+version = 1
+steps = [
+    { uds = "22 D1 00" },
+    { did_read = ["D100"] },
+    { session = "extended" },
+    { tester_present = true },
+    { delay_ms = 5 },
+]
+)");
+    EXPECT_NO_THROW(volvodiag::ensureDestructiveStepsConfirmed(scenario, false));
+}

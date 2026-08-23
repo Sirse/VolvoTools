@@ -283,6 +283,41 @@ void writeSummary(std::ostream& output, const ScriptScenario& scenario,
 
 } // namespace
 
+bool isDestructiveUdsService(const std::vector<uint8_t>& request)
+{
+    if (request.empty()) {
+        return false;
+    }
+    switch (request[0]) {
+    case 0x11: // ECUReset
+    case 0x14: // ClearDiagnosticInformation
+    case 0x2E: // WriteDataByIdentifier
+    case 0x31: // RoutineControl
+    case 0x34: // RequestDownload
+    case 0x36: // TransferData (download direction)
+        return true;
+    default:
+        return false;
+    }
+}
+
+void ensureDestructiveStepsConfirmed(const ScriptScenario& scenario, bool confirmDestructive)
+{
+    if (confirmDestructive) {
+        return;
+    }
+    for (size_t i = 0; i < scenario.steps.size(); ++i) {
+        const auto& step = scenario.steps[i];
+        if (step.kind != ScriptStep::Kind::Uds || !isDestructiveUdsService(step.request)) {
+            continue;
+        }
+        throw DiagError(ExitCode::UsageError,
+            "Scenario '" + scenario.name + "' step " + std::to_string(i + 1) + " ('" + step.name
+            + "') uses destructive UDS service 0x" + common::formatHexBytesLower({step.request[0]})
+            + "; re-run with --yes to confirm");
+    }
+}
+
 toml::table serializeScriptScenario(const ScriptScenario& scenario)
 {
     return resolvedScenarioTable(scenario);
@@ -365,6 +400,9 @@ void runScriptScenario(const std::vector<j2534::DeviceInfo>& devices, const RunO
         for (size_t i = 0; i < scenario.steps.size(); ++i) std::cout << i + 1 << ". " << scenario.steps[i].name << '\n';
         return;
     }
+    // Fail fast on a missing --yes before touching the device or the bus: the gate covers
+    // every step whose request targets a persistent-change UDS service.
+    ensureDestructiveStepsConfirmed(scenario, options.confirmDestructive);
     const auto outputDir = options.scriptOutputDir.empty() ? std::filesystem::path(".") : std::filesystem::path(options.scriptOutputDir);
     std::filesystem::create_directories(outputDir);
     auto summary = openArtifact(outputDir / "summary.toml", "scenario summary");

@@ -44,6 +44,16 @@ struct ScriptScenario {
 ScriptScenario loadScriptScenario(const std::string& path,
                                   const RunOptions& options);
 toml::table serializeScriptScenario(const ScriptScenario& scenario);
+
+// True when the request targets a service that makes persistent ECU changes - the same
+// set the CLI gates behind --yes for direct commands (reset, DTC clear, write, routine,
+// download/transfer).
+bool isDestructiveUdsService(const std::vector<uint8_t>& request);
+
+// Throws before any bus activity when the scenario contains destructive steps and
+// confirmDestructive is false, so a missing --yes fails fast instead of mid-run.
+void ensureDestructiveStepsConfirmed(const ScriptScenario& scenario, bool confirmDestructive);
+
 void runScriptScenario(const std::vector<j2534::DeviceInfo>& devices,
                        const RunOptions& options);
 
