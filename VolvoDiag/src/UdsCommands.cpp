@@ -7,6 +7,7 @@
 #include <common/J2534ChannelProvider.hpp>
 #include <common/Gateway.hpp>
 #include <common/Util.hpp>
+#include <common/protocols/UDSProtocolCommonSteps.hpp>
 #include <common/protocols/UDSDid.hpp>
 #include <common/protocols/UDSDtc.hpp>
 #include <common/protocols/UDSError.hpp>
@@ -193,41 +194,16 @@ bool enterDiagnosticSession(const j2534::J2534Channel& channel, uint32_t canId,
     }
 }
 
-uint32_t generateSecurityKeyStep(uint32_t hash, uint32_t input)
-{
-    for (size_t i = 0; i < 32; ++i) {
-        const bool isBitSet = ((hash ^ input) & 1U) != 0;
-        input >>= 1;
-        hash >>= 1;
-        if (isBitSet) {
-            hash = (hash | 0x800000U) ^ 0x109028U;
-        }
-    }
-    return hash;
-}
-
 std::array<uint8_t, 3> generateSecurityKey(const std::vector<uint8_t>& pin,
                                            const std::array<uint8_t, 3>& seed)
 {
     if (pin.size() != 5) {
         throw std::runtime_error("Security key input must contain exactly 5 bytes");
     }
-    const uint32_t highPart = (static_cast<uint32_t>(pin[4]) << 24)
-        | (static_cast<uint32_t>(pin[3]) << 16)
-        | (static_cast<uint32_t>(pin[2]) << 8)
-        | static_cast<uint32_t>(pin[1]);
-    const uint32_t lowPart = (static_cast<uint32_t>(pin[0]) << 24)
-        | (static_cast<uint32_t>(seed[2]) << 16)
-        | (static_cast<uint32_t>(seed[1]) << 8)
-        | static_cast<uint32_t>(seed[0]);
-    uint32_t hash = 0xC541A9U;
-    hash = generateSecurityKeyStep(hash, lowPart);
-    hash = generateSecurityKeyStep(hash, highPart);
-    const uint32_t result = ((hash & 0xF00000U) >> 12)
-        | (hash & 0xF000U)
-        | (static_cast<uint8_t>(16U * hash))
-        | ((hash & 0xFF0U) << 12)
-        | ((hash & 0xF0000U) >> 16);
+    // Single source of truth: the same algorithm the flasher and the bruteforcer use,
+    // pinned by reference vectors in SecurityKeyTests.
+    const std::array<uint8_t, 5> pinArray{pin[0], pin[1], pin[2], pin[3], pin[4]};
+    const uint32_t result = common::UDSProtocolCommonSteps::generateSecurityKey(pinArray, seed);
     return {static_cast<uint8_t>(result >> 16),
             static_cast<uint8_t>(result >> 8),
             static_cast<uint8_t>(result)};
