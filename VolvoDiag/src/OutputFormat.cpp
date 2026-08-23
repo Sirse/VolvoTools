@@ -150,6 +150,11 @@ std::vector<std::string> splitCsvLine(const std::string& line)
 uint64_t parseDecimalU64(const std::string& input, const std::string& fieldName)
 {
     const auto trimmed = common::trim(input);
+    // std::stoull accepts a leading '-' and wraps around: a typo like time_ms=-1 must be
+    // rejected, not become a 584-million-year sleep.
+    if (trimmed.empty() || trimmed.front() == '-' || trimmed.front() == '+') {
+        throw std::runtime_error("Invalid decimal " + fieldName + ": " + input);
+    }
     size_t processedChars = 0;
     const auto value = std::stoull(trimmed, &processedChars, 10);
     if (processedChars != trimmed.size()) {

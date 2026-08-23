@@ -55,6 +55,11 @@ namespace logger {
 				try {
 					size_t processedChars = 0;
 					const auto trimmed = trim(value);
+					// std::stoul accepts a leading '-' and wraps: Address=-1 must not
+					// become 0xFFFFFFFF and reach a UDS request.
+					if (trimmed.empty() || trimmed.front() == '-' || trimmed.front() == '+') {
+						throw std::invalid_argument("sign is not allowed");
+					}
 					const auto parsed = std::stoul(trimmed, &processedChars, base);
 					if (processedChars != trimmed.size()) {
 						throw std::invalid_argument("unexpected trailing characters");
