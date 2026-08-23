@@ -8,6 +8,10 @@ namespace {
 				return static_cast<int8_t>(value);
 			case 2:
 				return static_cast<int16_t>(value);
+			case 3:
+				// A plain int32_t cast would read a raw 0x800000 as +8388608: the sign
+				// lives in bit 23 and must be extended from there.
+				return static_cast<int32_t>((value & 0x800000) ? (value | 0xFF000000) : value);
 			default:
 				return static_cast<int32_t>(value);
 			}

@@ -15,6 +15,7 @@ add_executable(VolvoToolsTests
     SecurityKeyTests.cpp
     CliSupportTests.cpp
     IsoTpReassembleTests.cpp
+    LogParameterTests.cpp
     # The endian encoding vectors used to live in a separate optional target nobody ran;
     # merged here so they execute with every normal test pass.
     ${CMAKE_SOURCE_DIR}/Common/tests/EndianEncodingTests.cpp
@@ -34,8 +35,9 @@ target_compile_definitions(VolvoToolsTests PRIVATE
 )
 
 # VolvoDiagCore pulls in Common (protocol/format helpers) and the CLI parser. Flasher is linked
-# for the UDSReader-level integrity regression test (commitUploadResult).
-target_link_libraries(VolvoToolsTests VolvoDiagCore Flasher GTest::gtest)
+# for the UDSReader-level integrity regression test (commitUploadResult); Logger for the
+# log-parameter value conversion tests.
+target_link_libraries(VolvoToolsTests VolvoDiagCore Flasher Logger GTest::gtest)
 
 include(GoogleTest)
 gtest_discover_tests(VolvoToolsTests)
