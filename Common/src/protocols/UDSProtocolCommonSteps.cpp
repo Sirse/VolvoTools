@@ -355,6 +355,15 @@ namespace common {
                 return false;
             }
             const size_t maxSizeToTransfer = maxNumberOfBlockLength - 2;
+            // The TransferData counter is one byte and rolls over at 0xFF: a chunk that
+            // needs more blocks cannot be transferred in this session shape.
+            const size_t blockCount = (chunk.data.size() + maxSizeToTransfer - 1) / maxSizeToTransfer;
+            if (blockCount > 255) {
+                LOG(ERROR) << "transferChunk refused: chunk of 0x" << std::hex << chunk.data.size()
+                           << " bytes needs " << std::dec << blockCount
+                           << " TransferData blocks, the 1-byte counter caps at 255";
+                return false;
+            }
             uint8_t chunkIndex = 1;
             for (size_t i = 0; i < chunk.data.size(); i += maxSizeToTransfer, ++chunkIndex) {
                 const auto chunkEnd{ std::min(i + maxSizeToTransfer, chunk.data.size()) };

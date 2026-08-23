@@ -27,6 +27,8 @@ namespace flasher {
                        uint32_t canId,
                        const std::function<void(FlasherState)>& stateUpdater,
                        const std::function<void(size_t)>& progressUpdater,
+                       const std::function<void(size_t)> progressSetter,
+                       const std::function<size_t()> progressGetter,
                        const std::function<void(const std::string&)>& errorUpdater)
             : _channels{ channels }
             , _flasherParameters{ flasherParameters }
@@ -35,6 +37,8 @@ namespace flasher {
             , _isFailed{ false }
             , _stateUpdater{ stateUpdater }
             , _progressUpdater{ progressUpdater }
+            , _progressSetter{ progressSetter }
+            , _progressGetter{ progressGetter }
             , _errorUpdater{ errorUpdater }
         {
         }
@@ -161,10 +165,14 @@ namespace flasher {
             for(const auto& chunk: _flasherParameters.flash.chunks) {
                 _stateUpdater(FlasherState::WriteFlash);
                 bool chunkWritten = false;
+                size_t progressBeforeChunk = _progressGetter();
+                // A failed first attempt already advanced the progress bar; rewind to the
+                // chunk start so the retry does not count its bytes twice.
                 for (size_t attempt = 1; attempt <= 2 && !chunkWritten; ++attempt) {
                     if (attempt > 1) {
                         LOG(WARNING) << "Retry transferChunk attempt=" << attempt
                                      << " offset=0x" << std::hex << chunk.writeOffset;
+                        _progressSetter(progressBeforeChunk);
                     }
                     chunkWritten = common::UDSProtocolCommonSteps::transferChunk(channel, _canId, chunk,
                                                                                  _progressUpdater);
@@ -250,6 +258,8 @@ namespace flasher {
         std::optional<common::UninterruptibleRegion> _destructiveRegion;
         const std::function<void(FlasherState)> _stateUpdater;
         const std::function<void(size_t)> _progressUpdater;
+        const std::function<void(size_t)> _progressSetter;
+        const std::function<size_t()> _progressGetter;
         const std::function<void(const std::string&)> _errorUpdater;
     };
 
@@ -434,6 +444,12 @@ using M = hfsm2::MachineT<hfsm2::Config::ContextT<UDSFlasherImpl&>>;
         },
             [this](size_t progress) {
                 incCurrentProgress(progress);
+            },
+            [this](size_t value) {
+                setCurrentProgress(value);
+            },
+            [this]() {
+                return getCurrentProgress();
             },
             [this](const std::string& error) {
                 setLastError(error);

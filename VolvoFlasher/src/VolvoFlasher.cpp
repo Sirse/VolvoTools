@@ -273,8 +273,14 @@ bool getRunOptions(int argc, const char* argv[], std::string& deviceName,
 		}
 		else if (program.is_subcommand_used(read_command)) {
 			flashPath = read_command.get("-o");
-			start = read_command.get<unsigned long>("-s");
-			datasize = read_command.get<unsigned long>("-sz");
+		start = read_command.get<unsigned long>("-s");
+		datasize = read_command.get<unsigned long>("-sz");
+		if (datasize == 0) {
+			throw std::runtime_error("--size must be greater than zero");
+		}
+		if (start > std::numeric_limits<unsigned long>::max() - datasize) {
+			throw std::runtime_error("--start + --size exceeds the 32-bit address space");
+		}
 			sblPath = read_command.get<std::string>("--sbl");
 			readFormat = parseReadFormat(read_command.get<std::string>("--format"));
 			flashProgramMode = parseProgramMode(read_command.get<std::string>("--program-mode"));
@@ -1008,6 +1014,11 @@ void writeIntelHexRecord(std::ostream& output, uint8_t type, uint16_t address, c
 void saveIntelHex(const std::string& path, uint32_t start, const std::vector<uint8_t>& data)
 {
 	ensureOutputDirectoryExists(path);
+	// Intel-HEX extended addresses wrap at 4 GiB; refuse instead of emitting a file whose
+	// later records alias the beginning of the address space.
+	if (start != 0 && data.size() > 0xFFFFFFFFull - start) {
+		throw std::runtime_error("Read range wraps past the end of the 32-bit address space");
+	}
 	std::ofstream output(path);
 	if (!output) {
 		throw std::runtime_error("Failed to open output file: " + path);

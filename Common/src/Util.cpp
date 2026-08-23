@@ -486,6 +486,9 @@ namespace {
         result.TxFlags = Flags;
         result.Timestamp = 0;
         result.ExtraDataIndex = 0;
+        if (data.size() > sizeof(result.Data)) {
+            throw std::length_error("J2534 message payload exceeds PASSTHRU_MSG.Data capacity");
+        }
         result.DataSize = data.size();
         std::copy(data.begin(), data.end(), result.Data);
         return result;
@@ -502,6 +505,9 @@ namespace {
             msg.TxFlags = Flags;
             msg.Timestamp = 0;
             msg.ExtraDataIndex = 0;
+            if (msgData.size() > sizeof(msg.Data)) {
+                throw std::length_error("J2534 message payload exceeds PASSTHRU_MSG.Data capacity");
+            }
             msg.DataSize = msgData.size();
             std::copy(msgData.begin(), msgData.end(), msg.Data);
             result.emplace_back(std::move(msg));

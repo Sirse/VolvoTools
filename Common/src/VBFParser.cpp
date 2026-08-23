@@ -294,10 +294,12 @@ namespace common {
 		template<typename T>
 		uint32_t getUint32(T& iter)
 		{
-			uint8_t byte4 = *iter++;
-			uint8_t byte3 = *iter++;
-			uint8_t byte2 = *iter++;
-			uint8_t byte1 = *iter++;
+			// Promote before shifting: a plain uint8 << 24 goes through signed int and is
+			// formally UB once the top byte has its high bit set.
+			const uint32_t byte4 = static_cast<uint8_t>(*iter++);
+			const uint32_t byte3 = static_cast<uint8_t>(*iter++);
+			const uint32_t byte2 = static_cast<uint8_t>(*iter++);
+			const uint32_t byte1 = static_cast<uint8_t>(*iter++);
 			return (byte4 << 24) + (byte3 << 16) + (byte2 << 8) + byte1;
 		}
 
