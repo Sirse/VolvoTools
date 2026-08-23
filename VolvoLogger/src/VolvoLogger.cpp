@@ -78,7 +78,7 @@ static bool getRunOptions(int argc, const char *argv[], std::string &deviceName,
                    std::string &outputPath, unsigned &printCount, common::CarPlatform& carPlatform,
                    uint8_t& cmId, std::chrono::milliseconds& loggingInterval,
                    bool& listDevices, std::string& platformName,
-                   logger::UdsLoggerOptions& udsOptions) {
+                   logger::UdsLoggerOptions& udsOptions, bool& argsError) {
   argparse::ArgumentParser program("VolvoLogger");
   program.add_argument("--debug").default_value(false).implicit_value(true).nargs(0)
       .help("Enable verbose debug logging");
@@ -139,6 +139,9 @@ static bool getRunOptions(int argc, const char *argv[], std::string &deviceName,
   catch (const std::exception& err) {
       std::cerr << err.what() << std::endl;
       std::cerr << program;
+      // Distinguish a parse failure from "no arguments": scripts must see a nonzero
+      // exit code.
+      argsError = true;
   }
   return false;
 }
@@ -189,10 +192,15 @@ int main(int argc, const char *argv[]) {
   std::chrono::milliseconds loggingInterval{50};
   bool listDevices = false;
   logger::UdsLoggerOptions udsOptions;
+  bool argsError = false;
   const auto devices = common::getAvailableDevices();
-  if (getRunOptions(argc, argv, deviceName, baudrateOverride, paramsFilePath,
+  const bool optionsOk = getRunOptions(argc, argv, deviceName, baudrateOverride, paramsFilePath,
                     outputPath, printCount, carPlatform, cmId, loggingInterval,
-                    listDevices, platformName, udsOptions)) {
+                    listDevices, platformName, udsOptions, argsError);
+  if (argsError) {
+    return 2;
+  }
+  if (optionsOk) {
     if (listDevices) {
       common::printAvailableDevices(std::cout, devices);
       return 0;
@@ -233,12 +241,15 @@ int main(int argc, const char *argv[]) {
       } catch (const std::exception &ex) {
         LOG(ERROR) << "Logger command failed: " << ex.what();
         std::cout << ex.what() << std::endl;
+        return 1;
       } catch (const char *ex) {
         LOG(ERROR) << "Logger command failed: " << ex;
         std::cout << ex << std::endl;
+        return 1;
       } catch (...) {
         LOG(ERROR) << "Logger command failed with unknown exception";
         std::cout << "exception" << std::endl;
+        return 1;
       }
     }
   }

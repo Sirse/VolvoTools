@@ -156,7 +156,7 @@ bool getRunOptions(int argc, const char* argv[], std::string& deviceName,
 	ProgramMode& flashProgramMode, ReadFormat& readFormat,
 	std::vector<std::string>& rawData, bool& noWakeup, bool& attachRunningSbl,
 	bool& udsRawWake, uint8_t& udsRawSession, bool& noSblAuth, bool& skipFallAsleep,
-	common::PinSearchWindow& pinWindow, bool& pinWindowSet) {
+	common::PinSearchWindow& pinWindow, bool& pinWindowSet, bool& cliArgsError) {
 	argparse::ArgumentParser program("VolvoFlasher", "1.0", argparse::default_arguments::help);
     const auto addDebugArgument = [](argparse::ArgumentParser& parser) {
         parser.add_argument("--debug").default_value(false).implicit_value(true).nargs(0)
@@ -338,6 +338,9 @@ bool getRunOptions(int argc, const char* argv[], std::string& deviceName,
 	catch (const std::exception& err) {
 		std::cerr << err.what() << std::endl;
 		std::cerr << program;
+		// Distinguish a parse failure from "no subcommand given": scripts must see a
+		// nonzero exit code instead of a successful-looking device listing.
+		cliArgsError = true;
 	}
 	return false;
 }
@@ -1216,11 +1219,16 @@ int main(int argc, const char* argv[]) {
 	bool skipFallAsleep = false;
 	common::PinSearchWindow pinWindow;
 	bool pinWindowSet = false;
+	bool cliArgsError = false;
 	const auto devices = common::getAvailableDevices();
-	if (getRunOptions(argc, argv, deviceName, baudrate, flashPath, pin, pinSpecified, ecuId, start, datasize,
+	const bool optionsOk = getRunOptions(argc, argv, deviceName, baudrate, flashPath, pin, pinSpecified, ecuId, start, datasize,
 		runMode, sblPath, carPlatform, scanPinsUpward, resetFunctional, programHoldSeconds, flashProgramMode,
 		readFormat, rawData, noWakeup, attachRunningSbl,
-		udsRawWake, udsRawSession, noSblAuth, skipFallAsleep, pinWindow, pinWindowSet)) {
+		udsRawWake, udsRawSession, noSblAuth, skipFallAsleep, pinWindow, pinWindowSet, cliArgsError);
+	if (cliArgsError) {
+		return 2;
+	}
+	if (optionsOk) {
 		j2534::DeviceInfo device;
 		try {
 			device = common::selectSingleDevice(devices, deviceName);
