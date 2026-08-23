@@ -9,6 +9,7 @@
 #include <functional>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <thread>
 #include <vector>
@@ -24,6 +25,9 @@ struct FlasherParameters {
     std::shared_ptr<SBLProviderBase> sblProvider;
     const common::VBF flash;
     std::unique_ptr<common::EncryptorBase> encryptor;
+    // Applied only when explicitly set (an explicit -b on the command line); otherwise
+    // every bus opens at its configured baudrate.
+    std::optional<uint32_t> baudrateOverride;
 };
 
 class FlasherBase {

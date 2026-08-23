@@ -23,7 +23,8 @@ size_t FlasherBase::getProgressFromVBF(const common::VBF& vbf)
 }
 
 FlasherBase::FlasherBase(j2534::J2534 &j2534, FlasherParameters&& flasherParameters)
-    : _j2534ChannelProvider{ j2534, flasherParameters.carPlatform }
+    : _j2534ChannelProvider{ j2534, flasherParameters.carPlatform,
+          flasherParameters.baudrateOverride }
     , _flasherParameters{ std::move(flasherParameters) }
     , _currentProgress{ 0 }
     , _maximumProgress{ 0 }
